@@ -30,4 +30,8 @@ final class Event {
         self.source = source
         self.category = category
     }
+
+    var duration: TimeInterval { endTime.timeIntervalSince(startTime) }
+    var isUpcoming: Bool { startTime > Date.now }
+    var isInProgress: Bool { startTime <= Date.now && endTime > Date.now }
 }
