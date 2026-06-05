@@ -93,6 +93,94 @@ Each event supports:
 - Refresh widget timelines from the main app whenever the schedule changes using `WidgetCenter.shared.reloadAllTimelines()`
 - Do not attempt to display live AI-generated content in widgets — show only cached, locally stored data
 
+### 10. Habit Tracking
+- User defines habits, each tagged as either a **good habit** (something to do more of) or a **bad habit** (something to reduce)
+- Both types are tracked by **count**, not boolean — e.g. "went to gym 4 times", "smoked 3 times"
+- A habit can be **correlated to an event category by name** — when a matching event is marked as Completed, the habit count auto-increments; otherwise the user increments manually
+- Each habit shows a **graph of count over time** (daily/weekly view)
+- **Weekly habit message** — once a week the user receives a habit analysis:
+  - Hardcoded threshold responses trigger automatically (e.g. streak broken, new personal best, bad habit spiking) — no API call, always fires
+  - An optional **AI-generated analysis** is available on demand — user taps to generate, app makes a single API call with the week's habit data and returns a tailored insight; prompt details to be refined through experimentation
+- Monthly summary also includes habit trends (generated locally)
+
+### 11. Deep Project Planner
+- Designed for large, multi-session tasks (e.g. coding projects, assignments, learning goals)
+- User fills a **structured intake form** — goal description, deadline, weekly hours available, any known constraints
+- App builds a structured prompt from the form and sends it to Claude, which returns a **phased breakdown** with concrete subtasks and time-boxed milestones
+- Each subtask can be **scheduled as an event** (manual placement for v1)
+- When a planning session is scheduled, the relevant subtask goal is surfaced in the event detail so the user knows exactly what to work on
+- App provides a **"copy prompt"** option — power users can take the generated prompt to any external LLM
+- Input types supported in v1: **project-based** tasks (deadline + deliverables). Skill/habit-based goals (e.g. "learn Spanish") are a candidate for a future input type but not in scope yet
+
+#### Post-Release: Conversational Intake (Planned)
+After v1, add an optional **multi-turn intake flow** where Claude asks the user clarifying questions before generating the plan. This is more flexible for complex or ambiguous goals but requires managing conversation state and multiple API calls — defer to post-release.
+
+---
+
+## AI Request Architecture — Scheduling Intent Model
+
+Different scheduling intents require structurally different context sent to Claude. The app uses a `SchedulingContextBuilder` service that selects the right data shape per intent before making any API call.
+
+### Intent Types and Their Context Shape
+
+**Intent: Add to free slot**
+The user wants to place something new. Claude only needs to know where gaps are — not what fills them.
+```
+FREE_SLOTS: MON 13:00-15:30, MON 18:00-20:00, TUE 09:00-11:00
+NEW_EVENT: "dentist appointment, about an hour, prefer morning"
+PREFS: BufferBetweenEvents=15min, AvoidScheduling=[Tue afternoon]
+```
+The local scheduler computes gaps first; Claude never sees existing event details.
+
+**Intent: Move an existing event**
+Claude needs to understand what's committed and the cost of each candidate slot, including neighbouring events.
+```
+ANCHOR_EVENT: Work Meeting | MON 14:00-15:00 | category=Work
+SURROUNDING_EVENTS: MON 13:00-14:00[Study] MON 15:30-16:30[Gym]
+FREE_SLOTS: MON 16:30-18:00, TUE 10:00-12:00, TUE 14:00-16:00
+REASON_FOR_MOVE: "conflict with dentist"
+PREFS: PriorityCategories=[Work], BufferBetweenEvents=15min
+```
+
+**Intent: Reschedule a missed event**
+Similar to move, but adds missed count so Claude can weight suggestions realistically.
+```
+MISSED_EVENT: Gym Session | WAS: MON 07:00-08:00 | missed_count=2
+FREE_SLOTS (next 7d): TUE 06:30-08:00, WED 07:00-08:30, SAT 09:00-10:00
+PREFS: PreferMornings=true, MissedEventHandling=aggressive
+```
+
+**Intent: Habit weekly analysis (optional AI call)**
+Only triggered on user request. Sends the week's habit counts and basic trend direction.
+```
+HABITS_WEEK: Gym=4(↑ from 2), Smoking=3(↓ from 5), Reading=6(→ stable)
+PREFS: GoalGym=5/week, GoalSmoking=0
+```
+Prompt details to be experimented with — start minimal and iterate.
+
+**Intent: Deep project breakdown**
+Sends the structured intake form data; expects a phased plan back as JSON.
+```
+GOAL: "Build SwiftUI habit tracker app"
+DEADLINE: 2025-09-01
+WEEKLY_HOURS: 10
+CONSTRAINTS: "Weekends only, no Swift experience needed for UI layer"
+```
+
+### SchedulingContextBuilder (Swift)
+
+```swift
+enum SchedulingIntent {
+    case addToFreeSlot(description: String)
+    case moveEvent(event: Event, reason: String)
+    case rescheduleMissed(event: Event)
+    case habitWeeklyAnalysis(habits: [HabitWeekSummary])
+    case deepProjectPlan(form: ProjectPlanForm)
+}
+```
+
+Each case calls a dedicated builder method that runs entirely locally before the API call. Claude receives exactly the context it needs — nothing more.
+
 ---
 
 ## Data Architecture (Token Efficiency First)
@@ -106,15 +194,19 @@ This is the most critical design concern. The goal is to send the minimum necess
 - Completed/missed status logs
 - Raw meal list
 - Performance stats
+- Habit count history
 
 #### What gets sent to Claude API
 Only the **minimum structured context** required for the current task:
 
 | Task | What to send |
 |------|-------------|
-| Add event from prompt | User message + compressed schedule window (next 48–72h only) + relevant preferences |
-| Reschedule missed event | Missed event details + compressed free slots (next 7 days) + preferences |
+| Add event from prompt | Free slots only (next 48–72h) + event description + preferences |
+| Move existing event | Anchor event + neighbours + free slots + reason |
+| Reschedule missed event | Missed event + missed count + free slots (next 7 days) + preferences |
 | Meal planning | Meal list + upcoming schedule gaps + meal frequency preference |
+| Habit weekly analysis | Week's habit counts + trends + goals (user-triggered only) |
+| Deep project breakdown | Structured intake form fields |
 | Weekly/Monthly report | Send nothing — generate locally from stored data |
 
 #### Compressed Schedule Format (design this carefully)
@@ -166,6 +258,8 @@ Local Data Layer (SwiftData or Core Data)
     ↓
 Scheduler Service (local logic: conflict detection, free slot finder)
     ↓
+SchedulingContextBuilder (intent → structured API payload)
+    ↓
 AI Service (Claude API calls — only when needed)
     ↓
 Preferences Store (UserDefaults or local DB)
@@ -176,7 +270,7 @@ Widget Extension (WidgetKit — reads from shared AppGroup store)
 ```
 
 ### Key Design Rule
-**Do local logic first.** Only escalate to Claude API when the task requires language understanding or preference-based reasoning. Free slot detection, basic conflict checking, stats generation, notification scheduling, and widget data writing — all local.
+**Do local logic first.** Only escalate to Claude API when the task requires language understanding or preference-based reasoning. Free slot detection, basic conflict checking, stats generation, habit threshold responses, notification scheduling, and widget data writing — all local.
 
 ---
 
@@ -206,17 +300,32 @@ Local Dev (Claude Code)
 - Use Claude Code for: generating boilerplate, SwiftUI views, data model structs, writing tests
 - Do not use Claude Code for: architectural decisions (make those yourself first, then implement)
 
+#### Using Claude Code via Claude.ai (Web/App)
+Claude Code runs in the terminal or VS Code — it is a separate tool from the Claude.ai chat interface and the two are currently not linked. You cannot connect a Claude.ai chat session or project directly to a Claude Code terminal session; they do not share context automatically.
+
+For this project, the recommended approach is:
+- **Use Claude Code in terminal or VS Code** for active coding tasks (it can read your actual files)
+- **Use this Claude.ai project** for architecture discussion, README updates, prompt engineering decisions, and planning
+- When switching to a Claude Code session, paste the relevant README section as your opening context — the `CLAUDE.md` file in your project root is the right place to store persistent context that Claude Code loads automatically at the start of every session
+
+A GitHub issue exists requesting Claude Code ↔ Claude.ai Projects integration, but it is not currently available.
+
 ---
 
 ## App Release Flow (First Release Checklist)
 
 ### Phase 1 — Development
-- [ ] Core data model defined (Event, Category, Preference, Meal)
+- [ ] Core data model defined (Event, Category, Preference, Meal, Habit)
 - [ ] Local CRUD working for all event types
 - [ ] AI Service wrapper built (with token-efficient formatting)
+- [ ] SchedulingContextBuilder implemented (intent-based context shaping)
 - [ ] Preferences screen complete
 - [ ] Performance report screen (local only)
 - [ ] Meal planning flow complete
+- [ ] Habit tracking screen (count-based, graph view, event correlation)
+- [ ] Weekly habit threshold messages (local, hardcoded conditions)
+- [ ] Optional AI habit analysis (single API call, user-triggered)
+- [ ] Deep project planner (intake form + Claude breakdown + event scheduling)
 - [ ] Push notification service built (local scheduling via UNUserNotificationCenter)
 - [ ] Notification preferences added to UserPreferences
 - [ ] AppGroup entitlement configured on app + widget targets
@@ -245,26 +354,10 @@ Local Dev (Claude Code)
 - [ ] Monitor crash reports (Xcode Organizer or Sentry)
 - [ ] Version bump strategy: MAJOR.MINOR.PATCH
 - [ ] Push updates via the same CI/CD pipeline
+- [ ] Conversational intake for Deep Project Planner (multi-turn Claude flow)
 
 ---
 
-## Prompt Engineering Guidelines
-
-### For Claude Code Sessions
-Always open with:
-1. Which feature you're building
-2. The relevant data models involved
-3. What already exists (don't let Claude re-invent things)
-4. The exact output you want (a SwiftUI view, a service class, a test file)
-
-### For In-App Claude API Calls
-- System prompt = role definition + output JSON schema + hard constraints
-- User message = only the minimum dynamic data (compact schedule + event description)
-- Never ask Claude open-ended questions — always ask for a specific structured decision
-- Add a token budget to your system prompt: *"Be concise. Do not explain your reasoning unless asked."*
-
-### Iteration Rule
-When a Claude API response is poor quality, fix the system prompt or data format — not the parsing code. Bad outputs are almost always a context or instruction problem.
 
 ---
 
@@ -287,6 +380,13 @@ Category
 - name: String
 - colorHex: String
 
+Habit
+- id: UUID
+- name: String
+- type: HabitType // .good, .bad
+- correlatedCategoryName: String? // auto-increments when matching event is completed
+- countLog: [Date: Int] // date → count for that day
+
 UserPreferences
 - workingHours: ClosedRange<Date>
 - bufferMinutes: Int
@@ -302,6 +402,21 @@ Meal
 - id: UUID
 - name: String
 - prepTimeMinutes: Int
+
+ProjectPlan
+- id: UUID
+- title: String
+- deadline: Date
+- weeklyHoursAvailable: Int
+- constraints: String
+- phases: [ProjectPhase]
+
+ProjectPhase
+- id: UUID
+- title: String
+- subtasks: [String]
+- targetDate: Date
+- linkedEventIDs: [UUID]
 
 // Shared with Widget Extension (written to AppGroup UserDefaults)
 ScheduleWidgetData (Codable)
@@ -319,16 +434,3 @@ WidgetEvent (Codable)
 
 ---
 
-## First Two Steps (Where to Start)
-
-**Step 1 — Define and lock your data models**
-Before writing any UI or API code, finalise your core data models (Event, Category, Preferences, Meal) in a single Swift file. Everything else depends on this. Use SwiftData for persistence (modern, less boilerplate than Core Data for a new project). Also define `ScheduleWidgetData` and `WidgetEvent` at this stage — they are lightweight Codable structs and cost nothing to define early.
-
-**Step 2 — Build the local scheduler service**
-Write the logic that finds free slots, detects conflicts, and formats the compact schedule string. This is the engine the AI service will depend on. Test it thoroughly with unit tests before touching the Claude API. This step also forces you to think through your data flows before you add AI complexity.
-
----
-
-## Notes for Claude Code Context
-
-When starting a new Claude Code session, paste the relevant section of this README (data models, the feature you're working on, and the CI/CD setup). You do not need to paste the full file every time — just the sections relevant to the current task. Keep sessions focused and scoped.
