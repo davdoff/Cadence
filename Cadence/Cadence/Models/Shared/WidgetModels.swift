@@ -28,7 +28,7 @@ struct ScheduleWidgetData: Codable {
 
     func save() {
         guard
-            let defaults = UserDefaults(suiteName: appGroupID),
+            let defaults = UserDefaults(suiteName: ScheduleWidgetData.appGroupID),
             let data = try? JSONEncoder().encode(self)
         else { return }
         defaults.set(data, forKey: Self.appGroupKey)

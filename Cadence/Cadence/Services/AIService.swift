@@ -54,7 +54,12 @@ struct AIService {
             preferences: preferences,
             categories: categories
         )
-        let rawJSON = try await (_callAPI?(message) ?? callClaude(userMessage: message))
+        let rawJSON: String
+        if let callAPI = _callAPI {
+            rawJSON = try await callAPI(message)
+        } else {
+            rawJSON = try await callClaude(userMessage: message)
+        }
         return try parseResponse(rawJSON)
     }
 }

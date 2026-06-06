@@ -1,6 +1,6 @@
 import XCTest
 import SwiftData
-@testable import SmartScheduler
+@testable import Cadence
 
 final class AIServiceTests: XCTestCase {
 

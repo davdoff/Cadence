@@ -1,32 +1,44 @@
-//
-//  CadenceApp.swift
-//  Cadence
-//
-//  Created by David Botosineanu on 06.06.2026.
-//
-
 import SwiftUI
 import SwiftData
 
 @main
 struct CadenceApp: App {
-    var sharedModelContainer: ModelContainer = {
+    let container: ModelContainer = {
         let schema = Schema([
-            Item.self,
+            Event.self,
+            Category.self,
+            Meal.self,
+            UserPreferences.self
         ])
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
-
-        do {
-            return try ModelContainer(for: schema, configurations: [modelConfiguration])
-        } catch {
-            fatalError("Could not create ModelContainer: \(error)")
-        }
+        return try! ModelContainer(for: schema)
     }()
 
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .task { await seedIfNeeded() }
         }
-        .modelContainer(sharedModelContainer)
+        .modelContainer(container)
+    }
+
+    @MainActor
+    private func seedIfNeeded() async {
+        let context = container.mainContext
+        let categoryCount = (try? context.fetchCount(FetchDescriptor<Category>())) ?? 0
+        guard categoryCount == 0 else { return }
+
+        let defaults: [(String, String)] = [
+            ("Work",     "#4A90E2"),
+            ("Study",    "#7B68EE"),
+            ("Health",   "#5CB85C"),
+            ("Meal",     "#F0AD4E"),
+            ("Personal", "#9B59B6")
+        ]
+        for (name, hex) in defaults {
+            context.insert(Category(name: name, colorHex: hex))
+        }
+
+        context.insert(UserPreferences())
+        try? context.save()
     }
 }
