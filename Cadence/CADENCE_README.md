@@ -44,10 +44,181 @@ Each event supports:
 - Dedicated view listing all missed events
 - Option to **reschedule** missed events (AI-assisted or manual)
 
-### 6. Meal Planning
-- User maintains a list of meals they can prepare (stored in Food Preferences)
-- App suggests or schedules meals as events to ensure the user remembers to eat
-- Meals are treated as a special event category
+## 6. Meal Planning (Detailed)
+
+The meal planning system has two distinct scheduling tracks — breakfast and dinner — with different logic, different automation levels, and one targeted API call for new meal discovery. The goal is a system that runs itself week to week with minimal user input after initial setup.
+
+---
+
+### 6.1 Breakfast — Recurring Local Event
+
+Breakfast is a daily recurring event created automatically at a user-defined time. It requires no API call and no interaction once configured.
+
+**Behaviour:**
+- Created as a recurring `Event` (`source: .ai`, category = Meal, `recurrenceRule = .daily`)
+- Default time: configurable by user (e.g. 08:00), duration capped at 30 minutes
+- If a conflicting event already starts within 30 minutes of the breakfast slot on a given day, that day is silently skipped — no conflict is created
+- The user marks each instance `.completed` or `.missed` like any other event
+- If breakfast is missed 3 days in a row, a local notification fires at breakfast time on day 4: *"You've missed breakfast 3 days in a row. Want to adjust the time?"* — no API call, purely threshold-triggered
+
+**User setup (one-time):**
+- Set breakfast time in Food Preferences
+- Toggle breakfast reminders on/off per the existing per-category notification preference
+
+---
+
+### 6.2 Dinner — Random Slot, Random Meal, Local Logic
+
+Dinner scheduling is fully local. The randomness is intentional — the user explicitly wants variety without manual planning.
+
+**Behaviour:**
+- Window: 19:00–22:00 every day, including weekends (configurable: `dinnerWindowStart`, `dinnerWindowEnd`)
+- Duration per dinner = meal's `prepTimeMinutes` (default 45 min if unset)
+- `MealSchedulerService` calls the existing free slot finder, filtered to the dinner window, then picks a slot at random from valid candidates
+- Meal is also selected randomly from the user's `knownMeals` list
+- If no free slot exists within the window on a given day, that day is skipped silently — no forced conflict
+- Scheduled 7 days at a time: runs on app launch and whenever the schedule changes materially
+- Existing dinner events are not overwritten mid-week — reschedule only applies to days not yet scheduled
+
+**What the user maintains:**
+- A list of meals they can cook (`Meal` records with name and prep time)
+- This list is managed in Food Preferences; no AI is involved in maintaining it
+
+---
+
+### 6.3 New Meal Suggestion — Single Weekly API Call
+
+Once per week the app calls the Claude API to suggest one new meal to try. This is the only AI call in the entire meal planning system.
+
+**Trigger conditions (all must be true):**
+- `newMealSuggestionEnabled == true` in preferences
+- At least 7 days have elapsed since `lastNewMealSuggestedDate`
+- Triggered automatically during the weekly dinner scheduling pass — not user-initiated
+
+**What gets sent (token-efficient):**
+
+```
+INTENT: new_meal_suggestion
+EXISTING_MEALS: Pasta Bolognese(45min), Stir Fry(30min), Omelette(15min)
+FREE_DINNER_SLOTS: MON 19:30-21:00, WED 20:00-21:30, FRI 19:00-20:30, SAT 19:00-22:00
+PREFS: dinnerWindow=19:00-22:00
+```
+
+Nothing else is sent — no full event objects, no habit data, no other schedule context.
+
+**Expected JSON response (strict schema):**
+
+```json
+{
+  "meal": {
+    "name": "Thai Green Curry",
+    "prepTimeMinutes": 40,
+    "tags": ["spicy", "one-pot"],
+    "scheduledSlot": "WED 20:00"
+  }
+}
+```
+
+**After a successful response:**
+1. A new `Meal` record is created (`isUserDefined: false`, `tags` populated from response)
+2. An `Event` is created for the returned `scheduledSlot`
+3. `lastNewMealSuggestedDate` is updated to today
+4. The meal does **not** join the permanent rotation until the user cooks it at least once (marks the event `.completed`). If missed, it remains available for future suggestions but is deprioritised in random picks.
+
+---
+
+### 6.4 SchedulingIntent Extension
+
+Add to the existing `SchedulingIntent` enum:
+
+```swift
+case mealSuggestion(existingMeals: [Meal], freeDinnerSlots: [TimeSlot])
+```
+
+The `SchedulingContextBuilder` produces the compact plain-text payload above for this intent — consistent with all other intents. No JSON sent to the API; JSON only comes back.
+
+---
+
+### 6.5 Data Model Extensions
+
+New fields added to existing models (no existing fields changed):
+
+```swift
+// UserPreferences additions
+- breakfastEnabled: Bool                 // default true
+- breakfastTime: DateComponents          // e.g. 08:00
+- breakfastDuration: Int                 // minutes, max 30
+- dinnerWindowStart: DateComponents      // default 19:00
+- dinnerWindowEnd: DateComponents        // default 22:00
+- knownMealIDs: [UUID]                   // references into Meal store
+- newMealSuggestionEnabled: Bool
+- lastNewMealSuggestedDate: Date?
+
+// Meal additions
+- isUserDefined: Bool    // false = AI-suggested
+- tags: [String]         // populated only for AI-suggested meals
+```
+
+---
+
+### 6.6 Notifications
+
+All meal notifications are scheduled locally via `UNUserNotificationCenter`, using the existing `NotificationService`. No new notification infrastructure is needed.
+
+| Trigger | Notification copy | Timing |
+|---|---|---|
+| Breakfast approaching | "Breakfast in [N] min — don't skip it!" | `defaultReminderMinutes` before start |
+| Dinner approaching | "Time to cook: [Meal Name]" | `defaultReminderMinutes` before start |
+| Breakfast missed 3 days in a row | "You've missed breakfast 3 days. Adjust the time?" | Fires at `breakfastTime` on day 4 |
+
+On event edit or deletion, cancel and reschedule the associated notification — same rule as all other events.
+
+---
+
+### 6.7 Widget Integration
+
+After any meal scheduling pass, write the nearest upcoming meal event to `ScheduleWidgetData.nextMeal` (already defined in the widget data model). Call `WidgetCenter.shared.reloadAllTimelines()` after writing. No additional widget work needed — the **Next Meal** small widget reads from this field directly.
+
+---
+
+### 6.8 MealSchedulerService (Local — No API)
+
+A dedicated service handles all local meal scheduling. It does not touch the AI service.
+
+```swift
+class MealSchedulerService {
+
+    // Creates recurring breakfast events for the next 7 days.
+    // Skips days where a conflicting event exists within 30 min of breakfastTime.
+    func scheduleBreakfastIfNeeded(
+        existingEvents: [Event],
+        preferences: UserPreferences,
+        targetDates: [Date]
+    ) -> [Event]
+
+    // Finds random free dinner slots and assigns random meals.
+    // Skips days with no valid slot. Does not overwrite already-scheduled dinners.
+    func scheduleDinnerSlots(
+        existingEvents: [Event],
+        meals: [Meal],
+        preferences: UserPreferences,
+        targetDates: [Date]
+    ) -> [Event]
+
+    // Returns true if the weekly AI suggestion call should fire.
+    func shouldRequestNewMealSuggestion(preferences: UserPreferences) -> Bool
+}
+```
+
+---
+
+### 6.9 What Is Not in Scope (v1)
+
+- Lunch scheduling — not planned; `mealsPerDay` field is reserved for future use
+- Nutritional tracking or calorie data
+- Recipe steps or ingredient lists
+- Multi-turn AI conversation for meal planning
+- User rating or feedback on meals beyond the completed/missed status of the event
 
 ### 7. User Preferences
 - Schedule preferences (working hours, buffer time, priority windows)

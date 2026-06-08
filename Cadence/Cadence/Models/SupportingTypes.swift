@@ -4,6 +4,23 @@ enum EventStatus: String, Codable {
     case pending, completed, missed
 }
 
+enum HabitType: String, Codable {
+    case good, bad
+}
+
+struct HabitDayEntry: Identifiable {
+    let id: Date
+    let date: Date
+    let count: Int
+}
+
+struct HabitWeekSummary {
+    var name: String
+    var type: HabitType
+    var weekTotal: Int
+    var priorWeekTotal: Int
+}
+
 enum EventSource: String, Codable {
     case manual, ai, imported
 }

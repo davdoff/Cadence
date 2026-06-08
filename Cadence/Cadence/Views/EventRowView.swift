@@ -1,0 +1,58 @@
+import SwiftUI
+
+struct EventRowView: View {
+    let event: Event
+
+    private var timeRange: String {
+        let f = DateFormatter()
+        f.dateFormat = "h:mm a"
+        return "\(f.string(from: event.startTime)) – \(f.string(from: event.endTime))"
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            RoundedRectangle(cornerRadius: 3)
+                .fill(categoryColor)
+                .frame(width: 4)
+                .padding(.vertical, 4)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(event.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(.primary)
+                Text(timeRange)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Spacer()
+
+            statusBadge
+        }
+        .padding(14)
+        .background(Color.white)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
+    }
+
+    private var categoryColor: Color {
+        if let hex = event.category?.colorHex {
+            return Color(hex: hex)
+        }
+        return .cadenceOrangeLight
+    }
+
+    @ViewBuilder
+    private var statusBadge: some View {
+        switch event.status {
+        case .completed:
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundColor(.green)
+        case .missed:
+            Image(systemName: "exclamationmark.circle.fill")
+                .foregroundColor(.red)
+        case .pending:
+            EmptyView()
+        }
+    }
+}

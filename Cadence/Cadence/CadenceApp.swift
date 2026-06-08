@@ -8,9 +8,24 @@ struct CadenceApp: App {
             Event.self,
             Category.self,
             Meal.self,
-            UserPreferences.self
+            UserPreferences.self,
+            Habit.self
         ])
-        return try! ModelContainer(for: schema)
+        do {
+            return try ModelContainer(for: schema)
+        } catch {
+            // Schema changed on disk — wipe the store and start fresh.
+            let appSupport = FileManager.default.urls(
+                for: .applicationSupportDirectory, in: .userDomainMask
+            ).first!
+            let storeFiles = (try? FileManager.default.contentsOfDirectory(
+                at: appSupport, includingPropertiesForKeys: nil
+            )) ?? []
+            for file in storeFiles where file.lastPathComponent.contains("default") {
+                try? FileManager.default.removeItem(at: file)
+            }
+            return try! ModelContainer(for: schema)
+        }
     }()
 
     var body: some Scene {

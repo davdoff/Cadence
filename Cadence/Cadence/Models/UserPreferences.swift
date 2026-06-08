@@ -13,6 +13,23 @@ final class UserPreferences {
     // Meals
     var mealsPerDay: Int
 
+    // Breakfast
+    var breakfastEnabled: Bool
+    var breakfastHour: Int
+    var breakfastMinute: Int
+    var breakfastDuration: Int       // minutes, capped at 30
+
+    // Dinner window
+    var dinnerWindowStartHour: Int
+    var dinnerWindowStartMinute: Int
+    var dinnerWindowEndHour: Int
+    var dinnerWindowEndMinute: Int
+
+    // Meal catalog
+    var knownMealIDs: [UUID]
+    var newMealSuggestionEnabled: Bool
+    var lastNewMealSuggestedDate: Date?
+
     // AI behaviour: 1 = passive suggestions, 5 = aggressive scheduling
     var aiAggressiveness: Int
 
@@ -37,6 +54,17 @@ final class UserPreferences {
         defaultReminderMinutes = 15
         perCategoryNotificationsData = Data()
         compactPreferenceString = ""
+        breakfastEnabled = true
+        breakfastHour = 8
+        breakfastMinute = 0
+        breakfastDuration = 30
+        dinnerWindowStartHour = 19
+        dinnerWindowStartMinute = 0
+        dinnerWindowEndHour = 22
+        dinnerWindowEndMinute = 0
+        knownMealIDs = []
+        newMealSuggestionEnabled = true
+        lastNewMealSuggestedDate = nil
     }
 
     func perCategoryNotifications() -> [UUID: Bool] {

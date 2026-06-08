@@ -54,7 +54,7 @@ struct AIService {
             preferences: preferences,
             categories: categories
         )
-        let rawJSON: String
+        var rawJSON: String
         if let callAPI = _callAPI {
             rawJSON = try await callAPI(message)
         } else {
@@ -165,6 +165,175 @@ private extension AIService {
             throw AIServiceError.invalidResponse
         }
     }
+}
+
+// MARK: - Habit Analysis
+
+extension AIService {
+    func analyzeHabits(_ summaries: [HabitWeekSummary]) async throws -> String {
+        guard !summaries.isEmpty else { return "" }
+        let payload = summaries.map { s in
+            let trend = s.weekTotal > s.priorWeekTotal ? "↑" : (s.weekTotal < s.priorWeekTotal ? "↓" : "→")
+            return "\(s.name)=\(s.weekTotal)(\(trend) from \(s.priorWeekTotal))"
+        }.joined(separator: ", ")
+        let message = "HABITS_WEEK: \(payload)"
+        if let callAPI = _callAPI {
+            return try await callAPI(message)
+        }
+        return try await callClaudeHabits(userMessage: message)
+    }
+}
+
+private extension AIService {
+    func callClaudeHabits(userMessage: String) async throws -> String {
+        let url = URL(string: "https://api.anthropic.com/v1/messages")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue(apiKey,        forHTTPHeaderField: "x-api-key")
+        request.setValue("2023-06-01",  forHTTPHeaderField: "anthropic-version")
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+
+        let body = ClaudeRequest(
+            model: "claude-haiku-4-5-20251001",
+            max_tokens: 200,
+            system: AIService.habitSystemPrompt,
+            messages: [.init(role: "user", content: userMessage)]
+        )
+        request.httpBody = try JSONEncoder().encode(body)
+
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch {
+            throw AIServiceError.networkError(error)
+        }
+
+        guard let http = response as? HTTPURLResponse else { throw AIServiceError.invalidResponse }
+        guard (200...299).contains(http.statusCode) else { throw AIServiceError.apiError(statusCode: http.statusCode) }
+
+        let envelope = try JSONDecoder().decode(ClaudeAPIResponse.self, from: data)
+        guard let text = envelope.content.first?.text else { throw AIServiceError.invalidResponse }
+        return text
+    }
+}
+
+// MARK: - Meal Suggestion
+
+extension AIService {
+
+    struct MealSuggestionResult {
+        var meal: Meal
+        var scheduledStart: Date
+        var scheduledEnd: Date
+    }
+
+    /// One API call per week maximum (caller must check lastNewMealSuggestedDate before invoking).
+    func suggestNewMeal(
+        existingMeals: [Meal],
+        freeDinnerSlots: [TimeSlot],
+        preferences: UserPreferences,
+        referenceWeek: [Date]
+    ) async throws -> MealSuggestionResult {
+        let builder = SchedulingContextBuilder()
+        let message = builder.build(.mealSuggestion(existingMeals: existingMeals, freeDinnerSlots: freeDinnerSlots), preferences: preferences)
+
+        let rawJSON: String
+        if let callAPI = _callAPI {
+            rawJSON = try await callAPI(message)
+        } else {
+            rawJSON = try await callClaudeMealSuggestion(userMessage: message)
+        }
+
+        return try parseMealSuggestion(rawJSON, referenceWeek: referenceWeek, preferences: preferences)
+    }
+
+    private func callClaudeMealSuggestion(userMessage: String) async throws -> String {
+        let url = URL(string: "https://api.anthropic.com/v1/messages")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue(apiKey,            forHTTPHeaderField: "x-api-key")
+        request.setValue("2023-06-01",      forHTTPHeaderField: "anthropic-version")
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+
+        let body = ClaudeRequest(
+            model: "claude-haiku-4-5-20251001",
+            max_tokens: 200,
+            system: AIService.mealSuggestionSystemPrompt,
+            messages: [.init(role: "user", content: userMessage)]
+        )
+        request.httpBody = try JSONEncoder().encode(body)
+
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch {
+            throw AIServiceError.networkError(error)
+        }
+
+        guard let http = response as? HTTPURLResponse else { throw AIServiceError.invalidResponse }
+        guard (200...299).contains(http.statusCode) else { throw AIServiceError.apiError(statusCode: http.statusCode) }
+
+        let envelope = try JSONDecoder().decode(ClaudeAPIResponse.self, from: data)
+        guard let text = envelope.content.first?.text else { throw AIServiceError.invalidResponse }
+        return text
+    }
+
+    private func parseMealSuggestion(
+        _ json: String,
+        referenceWeek: [Date],
+        preferences: UserPreferences
+    ) throws -> MealSuggestionResult {
+        guard let data = json.data(using: .utf8),
+              let raw = try? JSONDecoder().decode(RawMealSuggestion.self, from: data)
+        else { throw AIServiceError.invalidResponse }
+
+        let meal = Meal(name: raw.meal.name, prepTimeMinutes: raw.meal.prepTimeMinutes, isUserDefined: false)
+        meal.tags = raw.meal.tags
+
+        guard let start = parseSlot(raw.meal.scheduledSlot, referenceWeek: referenceWeek) else {
+            throw AIServiceError.invalidResponse
+        }
+        let durationMinutes = raw.meal.prepTimeMinutes > 0 ? raw.meal.prepTimeMinutes : 45
+        let windowEnd = Calendar.current.date(
+            bySettingHour: preferences.dinnerWindowEndHour,
+            minute: preferences.dinnerWindowEndMinute,
+            second: 0, of: start
+        ) ?? start.addingTimeInterval(3600)
+        let end = Swift.min(start.addingTimeInterval(TimeInterval(durationMinutes * 60)), windowEnd)
+
+        return MealSuggestionResult(meal: meal, scheduledStart: start, scheduledEnd: end)
+    }
+
+    private func parseSlot(_ slot: String, referenceWeek: [Date]) -> Date? {
+        let parts = slot.split(separator: " ")
+        guard parts.count == 2 else { return nil }
+        let dayAbbr = String(parts[0]).uppercased()
+        let timeParts = parts[1].split(separator: ":")
+        guard timeParts.count == 2,
+              let hour = Int(timeParts[0]),
+              let minute = Int(timeParts[1]) else { return nil }
+
+        let fmt = DateFormatter()
+        fmt.dateFormat = "EEE"
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+
+        for date in referenceWeek {
+            if fmt.string(from: date).uppercased() == dayAbbr {
+                return Calendar.current.date(bySettingHour: hour, minute: minute, second: 0, of: date)
+            }
+        }
+        return nil
+    }
+}
+
+private struct RawMealSuggestion: Decodable {
+    struct MealData: Decodable {
+        let name: String
+        let prepTimeMinutes: Int
+        let tags: [String]
+        let scheduledSlot: String
+    }
+    let meal: MealData
 }
 
 // MARK: - Private Codable Types
