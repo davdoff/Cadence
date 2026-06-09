@@ -107,12 +107,21 @@ struct AddEventView: View {
     }
 
     private func forceInsert() {
-        context.insert(Event(
+        let event = Event(
             title: title.trimmingCharacters(in: .whitespaces),
             startTime: combinedStart,
             endTime: combinedEnd,
             category: selectedCategory
-        ))
+        )
+        context.insert(event)
+        let prefs = prefsResults.first ?? UserPreferences()
+        let svc = NotificationService()
+        if svc.isNotificationEnabled(for: event, prefs: prefs) {
+            event.notificationIdentifier = svc.scheduleEventReminder(
+                for: event, reminderMinutes: prefs.defaultReminderMinutes
+            )
+            svc.scheduleMissedEventAlert(for: event)
+        }
         try? context.save()
         dismiss()
     }

@@ -1,8 +1,11 @@
 import SwiftUI
+import SwiftData
 
 struct EventDetailView: View {
     let event: Event
+    @Environment(\.modelContext) private var context
     @AppStorage("accentColorHex") private var accentColorHex = "#E8784D"
+    @Query private var habits: [Habit]
 
     private var dateString: String {
         let f = DateFormatter()
@@ -78,6 +81,10 @@ struct EventDetailView: View {
                     .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
                 }
 
+                if event.status == .pending {
+                    markActions
+                }
+
                 Spacer()
             }
             .padding(16)
@@ -86,6 +93,56 @@ struct EventDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(Color.cadenceCream, for: .navigationBar)
     }
+
+    // MARK: - Mark actions
+
+    private var markActions: some View {
+        HStack(spacing: 12) {
+            Button {
+                mark(.completed)
+            } label: {
+                Label("Mark Complete", systemImage: "checkmark.circle.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(Color.green)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                mark(.missed)
+            } label: {
+                Label("Missed", systemImage: "xmark.circle.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .background(Color.red.opacity(0.8))
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    // MARK: - Logic
+
+    private func mark(_ status: EventStatus) {
+        let svc = NotificationService()
+        event.status = status
+        svc.cancelEventNotifications(for: event)
+        if status == .completed, let cat = event.category?.name {
+            for habit in habits where habit.correlatedCategoryName?.lowercased() == cat.lowercased() {
+                habit.increment()
+            }
+        } else if status == .missed {
+            svc.scheduleReschedulingNudge(for: event, after: 2)
+        }
+        try? context.save()
+    }
+
+    // MARK: - Helpers
 
     private var categoryColor: Color {
         if let hex = event.category?.colorHex {

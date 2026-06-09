@@ -8,10 +8,12 @@ struct SettingsView: View {
     private var prefs: UserPreferences? { prefsResults.first }
 
     // Scheduling prefs (loaded from SwiftData)
-    @State private var workStartHour: Double = 9
-    @State private var workEndHour:   Double = 18
-    @State private var bufferMinutes: Double = 15
-    @State private var aiLevel:       Double = 3
+    @State private var workStartHour:          Double = 9
+    @State private var workEndHour:            Double = 18
+    @State private var bufferMinutes:          Double = 15
+    @State private var aiLevel:                Double = 3
+    @State private var notificationsEnabled:   Bool   = true
+    @State private var defaultReminderMinutes: Double = 15
 
     // Personalisation (AppStorage = UserDefaults)
     @AppStorage("greetingName")    private var greetingName    = ""
@@ -93,6 +95,33 @@ struct SettingsView: View {
                     )
                     Text("Higher = AI suggests more proactively")
                         .font(.caption).foregroundColor(.secondary)
+                }
+
+                // Notifications
+                Section("Notifications") {
+                    Toggle("Enable notifications", isOn: $notificationsEnabled)
+                        .tint(Color(hex: accentColorHex))
+                        .onChange(of: notificationsEnabled) { _, enabled in
+                            if enabled { NotificationService.requestAuthorization() }
+                        }
+
+                    if notificationsEnabled {
+                        labeledSlider(
+                            label: "Default reminder",
+                            value: $defaultReminderMinutes,
+                            range: 0...60,
+                            step: 5,
+                            display: defaultReminderMinutes == 0
+                                ? "At start"
+                                : "\(Int(defaultReminderMinutes)) min before"
+                        )
+
+                        NavigationLink {
+                            CategoryNotificationsView()
+                        } label: {
+                            Label("Per-category alerts", systemImage: "tag.fill")
+                        }
+                    }
                 }
 
                 // Food
@@ -194,18 +223,22 @@ struct SettingsView: View {
 
     private func loadPrefs() {
         guard let p = prefs else { return }
-        workStartHour = Double(p.workStartHour)
-        workEndHour   = Double(p.workEndHour)
-        bufferMinutes = Double(p.bufferMinutes)
-        aiLevel       = Double(p.aiAggressiveness)
+        workStartHour          = Double(p.workStartHour)
+        workEndHour            = Double(p.workEndHour)
+        bufferMinutes          = Double(p.bufferMinutes)
+        aiLevel                = Double(p.aiAggressiveness)
+        notificationsEnabled   = p.notificationsEnabled
+        defaultReminderMinutes = Double(p.defaultReminderMinutes)
     }
 
     private func save() {
         guard let p = prefs else { return }
-        p.workStartHour    = Int(workStartHour)
-        p.workEndHour      = Int(workEndHour)
-        p.bufferMinutes    = Int(bufferMinutes)
-        p.aiAggressiveness = Int(aiLevel)
+        p.workStartHour          = Int(workStartHour)
+        p.workEndHour            = Int(workEndHour)
+        p.bufferMinutes          = Int(bufferMinutes)
+        p.aiAggressiveness       = Int(aiLevel)
+        p.notificationsEnabled   = notificationsEnabled
+        p.defaultReminderMinutes = Int(defaultReminderMinutes)
         p.compactPreferenceString = SchedulerService().compactPreferenceString(from: p, priorityCategories: [])
         try? context.save()
     }
@@ -215,5 +248,58 @@ struct SettingsView: View {
         let suffix  = hour >= 12 ? "PM" : "AM"
         let display = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour)
         return "\(display):00 \(suffix)"
+    }
+}
+
+// MARK: - Per-category notification toggles
+
+struct CategoryNotificationsView: View {
+    @Query(sort: \Category.name) private var categories: [Category]
+    @Query private var prefsResults: [UserPreferences]
+    @Environment(\.modelContext) private var context
+    @AppStorage("accentColorHex") private var accentColorHex = "#E8784D"
+
+    @State private var perCatNotifs: [UUID: Bool] = [:]
+
+    private var prefs: UserPreferences? { prefsResults.first }
+
+    var body: some View {
+        ZStack {
+            Color.cadenceCream.ignoresSafeArea()
+            List {
+                Section {
+                    ForEach(categories) { cat in
+                        Toggle(isOn: Binding(
+                            get: { perCatNotifs[cat.id] ?? true },
+                            set: { perCatNotifs[cat.id] = $0; savePerCat() }
+                        )) {
+                            HStack(spacing: 10) {
+                                Circle()
+                                    .fill(Color(hex: cat.colorHex))
+                                    .frame(width: 12, height: 12)
+                                Text(cat.name)
+                            }
+                        }
+                        .tint(Color(hex: accentColorHex))
+                    }
+                } footer: {
+                    Text("Disable to silence reminders for events in that category.")
+                        .font(.caption)
+                }
+            }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+        }
+        .navigationTitle("Per-Category Alerts")
+        .navigationBarTitleDisplayMode(.large)
+        .toolbarBackground(Color.cadenceCream, for: .navigationBar)
+        .onAppear {
+            perCatNotifs = prefs?.perCategoryNotifications() ?? [:]
+        }
+    }
+
+    private func savePerCat() {
+        prefs?.setPerCategoryNotifications(perCatNotifs)
+        try? context.save()
     }
 }

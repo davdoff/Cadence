@@ -31,7 +31,10 @@ struct CadenceApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .task { await seedIfNeeded() }
+                .task {
+                    NotificationService.requestAuthorization()
+                    await seedIfNeeded()
+                }
         }
         .modelContainer(container)
     }

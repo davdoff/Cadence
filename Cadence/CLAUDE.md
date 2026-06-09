@@ -1,111 +1,79 @@
-# CLAUDE.md — Meal Planning UI
+# Cadence — Next Steps (Priority Order)
 
-## Context
-The meal planning logic layer is fully implemented. This session is UI only.
-Do not modify any of the files listed under "Do not touch" below.
+Work from top to bottom. Each item is a discrete, buildable unit.
 
 ---
 
-## What Already Exists (do not reimplement)
+## 1. NotificationService — general event notifications (PARTIAL → DONE)
+Add to `NotificationService`:
+- `scheduleEventReminder(for event: Event, reminderMinutes: Int) -> String` — fires N min before any event
+- `scheduleMissedEventAlert(for event: Event)` — fires when event end time passes with status still `.pending`
+- `scheduleReschedulingNudge(for event: Event, after days: Int)` — fires if missed event is older than threshold
+Wire these up in the app wherever events are created, edited, or deleted (cancel + reschedule).
 
-### Models — read-only references for binding
+## 2. Notification preferences UI
+`SettingsView` currently exposes none of the notification fields that already exist on `UserPreferences`:
+- `notificationsEnabled` (global toggle)
+- `defaultReminderMinutes` (lead time slider, e.g. 0–60 min)
+- `perCategoryNotificationsData` (per-category toggles — decode/encode via existing helpers)
+Add a "Notifications" section to `SettingsView` exposing all three.
+
+## 3. Habit auto-increment in EventDetailView
+`TodayView.mark()` increments correlated habits on `.completed`. The same logic needs to run in `EventDetailView` when the user marks an event complete from the detail screen. Extract the increment logic to a shared function or add it directly to EventDetailView.
+
+## 4. SchedulingContextBuilder — remaining intents
+Add cases to the `SchedulingIntent` enum and builder methods for:
+- `addToFreeSlot(description: String)` — already called from AIInputView via `AIService.buildUserMessage`, but bypasses the builder; consolidate
+- `moveEvent(event: Event, reason: String)`
+- `rescheduleMissed(event: Event)`
+- `habitWeeklyAnalysis(habits: [HabitWeekSummary])`
+- `deepProjectPlan(goal: String, deadline: Date, weeklyHours: Int, constraints: String)`
+Match the compact plain-text format shown in the README for each.
+
+## 5. AIService — missing intent paths
+Once the builder cases above exist, add API call paths for:
+- `moveEvent` — returns `SchedulingDecision`
+- `rescheduleMissed` — returns `SchedulingDecision`
+- `deepProjectPlan` — returns structured JSON parsed into `[ProjectPhase]`
+
+## 6. ProjectPlan and ProjectPhase models
+Create `Models/ProjectPlan.swift`:
 ```swift
-Meal
-- id: UUID
-- name: String
-- prepTimeMinutes: Int
-- isUserDefined: Bool      // false = AI-suggested
-- tags: [String]           // populated for AI-suggested meals only
-
-UserPreferences (meal-relevant fields)
-- breakfastEnabled: Bool
-- breakfastTime: (hour: Int, minute: Int)
-- breakfastDuration: Int          // max 30
-- dinnerWindowStart: DateComponents
-- dinnerWindowEnd: DateComponents
-- knownMealIDs: [UUID]
-- newMealSuggestionEnabled: Bool
-- lastNewMealSuggestedDate: Date?
+@Model final class ProjectPlan { id, title, deadline, weeklyHoursAvailable, constraints, phases }
+@Model final class ProjectPhase { id, title, subtasks: [String], targetDate, linkedEventIDs: [UUID] }
 ```
 
-### Services — call these, do not rewrite them
-```swift
-MealSchedulerService
-- scheduleBreakfastIfNeeded(existingEvents:preferences:targetDates:) -> [Event]
-- scheduleDinnerSlots(existingEvents:meals:preferences:targetDates:) -> [Event]
-- nearestUpcomingMeal(from events: [Event]) -> Event?
+## 7. Deep Project Planner UI
+New views:
+- `ProjectPlannerView` — intake form (goal, deadline, weekly hours, constraints), submit button that calls `AIService.deepProjectPlan`
+- `ProjectPlanDetailView` — shows phases + subtasks, "Schedule as Event" button per subtask, "Copy Prompt" button
+Wire into the main navigation (add tab or Settings entry).
 
-MealPlanningCoordinator          // @MainActor
-- runWeeklyPass()                // call this after any preference change
-```
+## 8. AI-assisted reschedule in MissedEventsView
+Currently swipe-reschedule just opens `AddEventView` with a pre-filled title. Replace with an AI call using `SchedulingContextBuilder.rescheduleMissed` → show slot suggestions → confirm inserts event and deletes the missed one.
 
----
+## 9. WidgetKit extension
+- Create widget extension target in Xcode (`CadenceWidget`)
+- Enable AppGroup entitlement (`group.com.yourname.smartscheduler`) on both targets
+- Add `WidgetModels.swift` to both targets (already marked for dual-target in its comment)
+- Implement four widget views: Next Event (small), Today's Schedule (medium), Daily Progress (small), Next Meal (small)
+- Implement lock screen widgets (circular + rectangular accessory) for next event and daily count
+- Use `TimelineProvider` with reload at event start or midnight
 
-## Screens to Build
+## 10. CI/CD
+- Create `.github/workflows/ci.yml` — SwiftLint, `xcodebuild test`, `xcodebuild build` for both app and widget targets
+- Add SwiftLint config (`.swiftlint.yml`) with sensible rules for this project
 
-### Screen 1 — Food Preferences (settings screen)
-
-Entry point: existing Preferences flow, new "Food" section.
-
-**Breakfast section**
-- Toggle: "Schedule breakfast" → `breakfastEnabled`
-- Time picker (hour/minute wheels or inline DatePicker, .hourAndMinute): `breakfastTime`
-- Show a short explainer below the toggle when enabled:
-  *"A 30-min breakfast block will be added to your schedule each morning. Days with a conflict nearby are skipped automatically."*
-- Hide time picker when toggle is off
-
-**Dinner section**
-- Header: "Dinner window"
-- Two time pickers side by side: Start (`dinnerWindowStart`) and End (`dinnerWindowEnd`)
-- Inline constraint: end must be after start — show a validation message if not
-
-**My Meals list**
-- List of `Meal` objects from `knownMealIDs`, showing `name` and `prepTimeMinutes`
-- Each row: meal name left, "X min" right, swipe-to-delete
-- "Add meal" button → sheet with two fields: Name (text), Prep time (stepper or number field, minutes)
-- New meals are always `isUserDefined = true`
-- AI-suggested meals (`isUserDefined == false`) show a small "✦ AI pick" badge — they appear in the list once the user has cooked them (event marked `.completed`)
-
-**New meal discovery**
-- Toggle: "Suggest a new meal to try each week" → `newMealSuggestionEnabled`
-- Below toggle when enabled, show `lastNewMealSuggestedDate` as: "Last suggestion: [relative date]" or "Not suggested yet" if nil
-
-**Save / apply**
-- On any change, call `MealPlanningCoordinator.runWeeklyPass()` after saving preferences
-- No separate save button needed if preferences auto-save on change (match existing preferences UX pattern)
+## 11. Event import from external links / ICS
+- Parse ICS / calendar URL input
+- Map to `Event` model
+- Show preview before inserting
 
 ---
 
-### Screen 2 — This Week's Meals (read-only overview)
-
-Entry point: a "Meals this week" card or row in the main schedule view, or a tab if the app has one.
-
-**Content**
-- 7-row list, one per day (Mon–Sun), each row shows:
-  - Day label
-  - Breakfast slot time (if scheduled) or "Skipped" in muted text
-  - Dinner slot: meal name + time, or "No slot" in muted text
-  - AI-suggested meal rows show the "✦ AI pick" badge
-- Rows for past days are dimmed
-- Tapping a dinner row deep-links to that event in the main schedule (use existing event detail navigation)
-
-**Empty state**
-- If no meals are scheduled yet (first launch, preferences not set): show a prompt — "Set up your meal preferences to get started" with a button that navigates to Food Preferences
-
----
-
-## UI Rules for This Session
-- Match the existing app's component style — do not introduce new design patterns
-- Use the existing colour/category system for the Meal category colour on event rows
-- No loading spinners for local operations — they are instant
-- `runWeeklyPass()` may involve an async API call (new meal suggestion) — show a subtle activity indicator only on the "Meals this week" screen while it runs, not in preferences
-- Do not add any navigation that bypasses the existing nav stack
-
-## Do Not Touch
-- `MealSchedulerService.swift`
-- `MealPlanningCoordinator.swift`
-- `AIService.swift` and `AIService+SystemPrompt.swift`
-- `SchedulingContextBuilder.swift`
-- `NotificationService.swift`
-- `MealSchedulerServiceTests.swift`
-- Any existing event, habit, or preferences UI
+## Reference
+- Full spec: `CADENCE_README.md`
+- Implementation status: `CADENCE_WORK_LOG.md`
+- API key is injected via `Info.plist` key `ANTHROPIC_API_KEY`
+- Model: `claude-haiku-4-5-20251001`, max_tokens 200–300 per call
+- AppGroup ID placeholder: `group.com.yourname.smartscheduler` (update before TestFlight)
