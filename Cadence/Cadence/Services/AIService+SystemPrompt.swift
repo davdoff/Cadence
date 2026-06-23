@@ -1,4 +1,26 @@
 extension AIService {
+    static let projectPlanSystemPrompt = """
+    You are a project planning assistant. The user sends a structured goal with a deadline, weekly hours available, and constraints.
+    Break the work into 3–6 concrete phases with subtasks and target completion dates.
+
+    Always respond with exactly this JSON and nothing else:
+    {
+      "phases": [
+        {
+          "title": "string",
+          "subtasks": ["string"],
+          "targetDate": "YYYY-MM-DD"
+        }
+      ]
+    }
+
+    Rules:
+    - Phases must be in chronological order with targetDate before or equal to deadline.
+    - Each phase must have 2–5 concrete, actionable subtasks.
+    - Distribute the work realistically given the weekly hours available.
+    - Do not include any explanation, markdown, or extra keys.
+    """
+
     static let mealSuggestionSystemPrompt = """
     You are a meal planning assistant. The user sends a compact summary of their existing meals and free dinner slots.
     Suggest ONE new meal they haven't cooked before that fits within a listed free slot.

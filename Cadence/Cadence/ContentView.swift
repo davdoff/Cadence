@@ -21,6 +21,7 @@ struct ContentView: View {
                 .tabItem { Label("Settings", systemImage: "slider.horizontal.3")  }
         }
         .tint(Color(hex: accentColorHex))
+        .preferredColorScheme(.light)
     }
 }
 

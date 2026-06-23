@@ -272,11 +272,15 @@ struct TodayView: View {
     // MARK: - Helpers
 
     private func mark(_ event: Event, _ status: EventStatus) {
+        let svc = NotificationService()
         event.status = status
+        svc.cancelEventNotifications(for: event)
         if status == .completed, let cat = event.category?.name {
             for habit in habits where habit.correlatedCategoryName?.lowercased() == cat.lowercased() {
                 habit.increment()
             }
+        } else if status == .missed {
+            svc.scheduleReschedulingNudge(for: event, after: 2)
         }
         try? context.save()
     }

@@ -47,7 +47,7 @@ struct MissedEventsView: View {
         List {
             ForEach(missedEvents) { event in
                 EventRowView(event: event)
-                    .listRowBackground(Color.clear)
+                    .listRowBackground(Color.cadenceCream)
                     .listRowSeparator(.hidden)
                     .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                     .swipeActions(edge: .leading, allowsFullSwipe: true) {

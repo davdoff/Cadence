@@ -48,44 +48,20 @@ struct AIService {
         preferences: UserPreferences,
         categories: [Category]
     ) async throws -> SchedulingDecision {
-        let message = buildUserMessage(
-            description: description,
-            events: events,
-            preferences: preferences,
-            categories: categories
+        let now = Date.now
+        let window = now...now.addingTimeInterval(72 * 3600)
+        let freeSlots = scheduler.freeSlots(duration: 30, in: window, events: events, preferences: preferences)
+        let message = SchedulingContextBuilder().build(
+            .addToFreeSlot(description: description, freeSlots: freeSlots),
+            preferences: preferences
         )
-        var rawJSON: String
+        let rawJSON: String
         if let callAPI = _callAPI {
             rawJSON = try await callAPI(message)
         } else {
             rawJSON = try await callClaude(userMessage: message)
         }
         return try parseResponse(rawJSON)
-    }
-}
-
-// MARK: - Message Builder
-
-private extension AIService {
-    func buildUserMessage(
-        description: String,
-        events: [Event],
-        preferences: UserPreferences,
-        categories: [Category]
-    ) -> String {
-        let now = Date.now
-        let window = now...now.addingTimeInterval(72 * 3600)
-        let prefsLine    = scheduler.compactPreferenceString(from: preferences, priorityCategories: categories)
-        let scheduleLine = scheduler.compactScheduleString(for: events, in: window, preferences: preferences)
-
-        return """
-        Prefs: \(prefsLine)
-
-        Schedule (next 72h):
-        \(scheduleLine)
-
-        Request: \(description)
-        """
     }
 }
 
@@ -324,6 +300,154 @@ extension AIService {
         }
         return nil
     }
+}
+
+// MARK: - Move Event
+
+extension AIService {
+    func moveEvent(
+        event: Event,
+        reason: String,
+        allEvents: [Event],
+        preferences: UserPreferences
+    ) async throws -> SchedulingDecision {
+        let now = Date.now
+        let window = now...now.addingTimeInterval(7 * 24 * 3600)
+        let freeSlots = scheduler.freeSlots(duration: 30, in: window, events: allEvents, preferences: preferences)
+        let cal = Calendar.current
+        let surrounding = allEvents.filter {
+            $0.id != event.id &&
+            $0.status != .missed &&
+            cal.isDate($0.startTime, inSameDayAs: event.startTime)
+        }
+        let message = SchedulingContextBuilder().build(
+            .moveEvent(event: event, reason: reason, surroundingEvents: surrounding, freeSlots: freeSlots),
+            preferences: preferences
+        )
+        let rawJSON: String
+        if let callAPI = _callAPI {
+            rawJSON = try await callAPI(message)
+        } else {
+            rawJSON = try await callClaude(userMessage: message)
+        }
+        return try parseResponse(rawJSON)
+    }
+}
+
+// MARK: - Reschedule Missed
+
+extension AIService {
+    func rescheduleMissed(
+        event: Event,
+        missedCount: Int,
+        allEvents: [Event],
+        preferences: UserPreferences
+    ) async throws -> SchedulingDecision {
+        let now = Date.now
+        let window = now...now.addingTimeInterval(7 * 24 * 3600)
+        let freeSlots = scheduler.freeSlots(duration: 30, in: window, events: allEvents, preferences: preferences)
+        let message = SchedulingContextBuilder().build(
+            .rescheduleMissed(event: event, missedCount: missedCount, freeSlots: freeSlots),
+            preferences: preferences
+        )
+        let rawJSON: String
+        if let callAPI = _callAPI {
+            rawJSON = try await callAPI(message)
+        } else {
+            rawJSON = try await callClaude(userMessage: message)
+        }
+        return try parseResponse(rawJSON)
+    }
+}
+
+// MARK: - Deep Project Plan
+
+struct ProjectPhaseData {
+    var title: String
+    var subtasks: [String]
+    var targetDate: Date?
+}
+
+extension AIService {
+    func deepProjectPlan(
+        goal: String,
+        deadline: Date,
+        weeklyHours: Int,
+        constraints: String,
+        preferences: UserPreferences
+    ) async throws -> [ProjectPhaseData] {
+        let message = SchedulingContextBuilder().build(
+            .deepProjectPlan(goal: goal, deadline: deadline, weeklyHours: weeklyHours, constraints: constraints),
+            preferences: preferences
+        )
+        let rawJSON: String
+        if let callAPI = _callAPI {
+            rawJSON = try await callAPI(message)
+        } else {
+            rawJSON = try await callClaudeProjectPlan(userMessage: message)
+        }
+        return try parseProjectPlan(rawJSON)
+    }
+}
+
+private extension AIService {
+    func callClaudeProjectPlan(userMessage: String) async throws -> String {
+        let url = URL(string: "https://api.anthropic.com/v1/messages")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue(apiKey,             forHTTPHeaderField: "x-api-key")
+        request.setValue("2023-06-01",       forHTTPHeaderField: "anthropic-version")
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+
+        let body = ClaudeRequest(
+            model: "claude-haiku-4-5-20251001",
+            max_tokens: 600,
+            system: AIService.projectPlanSystemPrompt,
+            messages: [.init(role: "user", content: userMessage)]
+        )
+        request.httpBody = try JSONEncoder().encode(body)
+
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch {
+            throw AIServiceError.networkError(error)
+        }
+
+        guard let http = response as? HTTPURLResponse else { throw AIServiceError.invalidResponse }
+        guard (200...299).contains(http.statusCode) else { throw AIServiceError.apiError(statusCode: http.statusCode) }
+
+        let envelope = try JSONDecoder().decode(ClaudeAPIResponse.self, from: data)
+        guard let text = envelope.content.first?.text else { throw AIServiceError.invalidResponse }
+        return text
+    }
+
+    func parseProjectPlan(_ json: String) throws -> [ProjectPhaseData] {
+        guard let data = json.data(using: .utf8),
+              let raw = try? JSONDecoder().decode(RawProjectPlan.self, from: data)
+        else { throw AIServiceError.invalidResponse }
+
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd"
+        fmt.locale = Locale(identifier: "en_US_POSIX")
+
+        return raw.phases.map { phase in
+            ProjectPhaseData(
+                title: phase.title,
+                subtasks: phase.subtasks,
+                targetDate: phase.targetDate.flatMap { fmt.date(from: $0) }
+            )
+        }
+    }
+}
+
+private struct RawProjectPlan: Decodable {
+    struct Phase: Decodable {
+        let title: String
+        let subtasks: [String]
+        let targetDate: String?
+    }
+    let phases: [Phase]
 }
 
 private struct RawMealSuggestion: Decodable {

@@ -4,55 +4,51 @@ Work from top to bottom. Each item is a discrete, buildable unit.
 
 ---
 
-## 1. NotificationService — general event notifications (PARTIAL → DONE)
-Add to `NotificationService`:
-- `scheduleEventReminder(for event: Event, reminderMinutes: Int) -> String` — fires N min before any event
-- `scheduleMissedEventAlert(for event: Event)` — fires when event end time passes with status still `.pending`
-- `scheduleReschedulingNudge(for event: Event, after days: Int)` — fires if missed event is older than threshold
-Wire these up in the app wherever events are created, edited, or deleted (cancel + reschedule).
+## ✅ DONE — Notifications (items 1–3)
+- `NotificationService` has all three event notification methods: `scheduleEventReminder`, `scheduleMissedEventAlert`, `scheduleReschedulingNudge`, `cancelEventNotifications`
+- `SettingsView` exposes the notifications section: global toggle, reminder-minutes slider, per-category nav link (`CategoryNotificationsView`)
+- `TodayView.mark()`, `EventDetailView.mark()`, `AddEventView.forceInsert()`, `AIInputView.insertDraft()` all cancel/schedule notifications correctly
+- Habit auto-increment runs in both `TodayView.mark()` and `EventDetailView.mark()`
 
-## 2. Notification preferences UI
-`SettingsView` currently exposes none of the notification fields that already exist on `UserPreferences`:
-- `notificationsEnabled` (global toggle)
-- `defaultReminderMinutes` (lead time slider, e.g. 0–60 min)
-- `perCategoryNotificationsData` (per-category toggles — decode/encode via existing helpers)
-Add a "Notifications" section to `SettingsView` exposing all three.
+## ✅ DONE — SchedulingContextBuilder + AIService intent layer (items 4–5)
+- `SchedulingIntent` has all 6 cases: `mealSuggestion`, `addToFreeSlot`, `moveEvent`, `rescheduleMissed`, `habitWeeklyAnalysis`, `deepProjectPlan`
+- `SchedulingContextBuilder.build(_:preferences:)` produces compact plain-text payloads for every intent
+- `AIService.scheduleEvent` now goes through the builder (sends free slots, not full schedule)
+- `AIService.moveEvent` and `AIService.rescheduleMissed` added — both return `SchedulingDecision`
+- `AIService.deepProjectPlan` added — returns `[ProjectPhaseData]` parsed from structured JSON
+- `projectPlanSystemPrompt` added to `AIService+SystemPrompt`
+- `ProjectPhaseData` value type defined in `AIService.swift` (temporary — superseded by item 1 below)
 
-## 3. Habit auto-increment in EventDetailView
-`TodayView.mark()` increments correlated habits on `.completed`. The same logic needs to run in `EventDetailView` when the user marks an event complete from the detail screen. Extract the increment logic to a shared function or add it directly to EventDetailView.
+---
 
-## 4. SchedulingContextBuilder — remaining intents
-Add cases to the `SchedulingIntent` enum and builder methods for:
-- `addToFreeSlot(description: String)` — already called from AIInputView via `AIService.buildUserMessage`, but bypasses the builder; consolidate
-- `moveEvent(event: Event, reason: String)`
-- `rescheduleMissed(event: Event)`
-- `habitWeeklyAnalysis(habits: [HabitWeekSummary])`
-- `deepProjectPlan(goal: String, deadline: Date, weeklyHours: Int, constraints: String)`
-Match the compact plain-text format shown in the README for each.
-
-## 5. AIService — missing intent paths
-Once the builder cases above exist, add API call paths for:
-- `moveEvent` — returns `SchedulingDecision`
-- `rescheduleMissed` — returns `SchedulingDecision`
-- `deepProjectPlan` — returns structured JSON parsed into `[ProjectPhase]`
-
-## 6. ProjectPlan and ProjectPhase models
-Create `Models/ProjectPlan.swift`:
+## 1. ProjectPlan and ProjectPhase models
+Create `Models/ProjectPlan.swift` with SwiftData models:
 ```swift
-@Model final class ProjectPlan { id, title, deadline, weeklyHoursAvailable, constraints, phases }
-@Model final class ProjectPhase { id, title, subtasks: [String], targetDate, linkedEventIDs: [UUID] }
+@Model final class ProjectPlan {
+    var id: UUID; var title: String; var deadline: Date
+    var weeklyHoursAvailable: Int; var constraints: String
+    @Relationship(deleteRule: .cascade) var phases: [ProjectPhase]
+}
+@Model final class ProjectPhase {
+    var id: UUID; var title: String; var subtasks: [String]
+    var targetDate: Date?; var linkedEventIDs: [UUID]
+}
 ```
+Register both in `CadenceApp` schema. Remove `ProjectPhaseData` from `AIService.swift` and update `deepProjectPlan` to return `[ProjectPhase]`.
 
-## 7. Deep Project Planner UI
+## 2. Deep Project Planner UI
 New views:
-- `ProjectPlannerView` — intake form (goal, deadline, weekly hours, constraints), submit button that calls `AIService.deepProjectPlan`
-- `ProjectPlanDetailView` — shows phases + subtasks, "Schedule as Event" button per subtask, "Copy Prompt" button
-Wire into the main navigation (add tab or Settings entry).
+- `ProjectPlannerView` — intake form (goal TextField, deadline DatePicker, weekly hours Stepper, constraints TextField), submit calls `AIService.deepProjectPlan`, shows loading then navigates to detail
+- `ProjectPlanDetailView` — lists phases + subtasks; "Schedule as Event" button per subtask opens `AddEventView` pre-filled; "Copy Prompt" button copies the builder output to clipboard
+Wire into `ContentView` navigation (Settings entry or dedicated tab).
 
-## 8. AI-assisted reschedule in MissedEventsView
-Currently swipe-reschedule just opens `AddEventView` with a pre-filled title. Replace with an AI call using `SchedulingContextBuilder.rescheduleMissed` → show slot suggestions → confirm inserts event and deletes the missed one.
+## 3. AI-assisted reschedule in MissedEventsView
+`AIService.rescheduleMissed` now exists. Replace the swipe-reschedule action in `MissedEventsView` (currently opens plain `AddEventView`) with:
+1. Call `AIService.rescheduleMissed(event:missedCount:allEvents:preferences:)`
+2. Show slot suggestions (same card UI as `AIInputView`)
+3. On confirm: insert new event with notifications, delete the missed one
 
-## 9. WidgetKit extension
+## 4. WidgetKit extension
 - Create widget extension target in Xcode (`CadenceWidget`)
 - Enable AppGroup entitlement (`group.com.yourname.smartscheduler`) on both targets
 - Add `WidgetModels.swift` to both targets (already marked for dual-target in its comment)
@@ -60,11 +56,11 @@ Currently swipe-reschedule just opens `AddEventView` with a pre-filled title. Re
 - Implement lock screen widgets (circular + rectangular accessory) for next event and daily count
 - Use `TimelineProvider` with reload at event start or midnight
 
-## 10. CI/CD
+## 5. CI/CD
 - Create `.github/workflows/ci.yml` — SwiftLint, `xcodebuild test`, `xcodebuild build` for both app and widget targets
 - Add SwiftLint config (`.swiftlint.yml`) with sensible rules for this project
 
-## 11. Event import from external links / ICS
+## 6. Event import from external links / ICS
 - Parse ICS / calendar URL input
 - Map to `Event` model
 - Show preview before inserting
@@ -75,5 +71,5 @@ Currently swipe-reschedule just opens `AddEventView` with a pre-filled title. Re
 - Full spec: `CADENCE_README.md`
 - Implementation status: `CADENCE_WORK_LOG.md`
 - API key is injected via `Info.plist` key `ANTHROPIC_API_KEY`
-- Model: `claude-haiku-4-5-20251001`, max_tokens 200–300 per call
+- Model: `claude-haiku-4-5-20251001`, max_tokens 200–600 per call (600 for deepProjectPlan)
 - AppGroup ID placeholder: `group.com.yourname.smartscheduler` (update before TestFlight)

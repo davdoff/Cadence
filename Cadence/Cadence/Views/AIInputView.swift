@@ -265,13 +265,22 @@ struct AIInputView: View {
 
     private func insertDraft(_ draft: EventDraft) {
         let matched = categories.first { $0.name.lowercased() == draft.categoryName.lowercased() }
-        context.insert(Event(
+        let event = Event(
             title: draft.title.isEmpty ? description : draft.title,
             startTime: draft.start,
             endTime: draft.end,
             category: matched,
             source: .ai
-        ))
+        )
+        context.insert(event)
+        let prefs = prefsResults.first ?? UserPreferences()
+        let svc = NotificationService()
+        if svc.isNotificationEnabled(for: event, prefs: prefs) {
+            event.notificationIdentifier = svc.scheduleEventReminder(
+                for: event, reminderMinutes: prefs.defaultReminderMinutes
+            )
+            svc.scheduleMissedEventAlert(for: event)
+        }
         try? context.save()
         dismiss()
     }
