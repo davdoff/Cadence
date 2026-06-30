@@ -15,7 +15,7 @@ final class AIServiceTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        let schema = Schema([Event.self, Category.self, Meal.self, UserPreferences.self])
+        let schema = Schema([Event.self, Cadence.Category.self, Meal.self, UserPreferences.self])
         container = try! ModelContainer(for: schema, configurations: ModelConfiguration(isStoredInMemoryOnly: true))
         context = ModelContext(container)
     }
@@ -156,5 +156,206 @@ final class AIServiceTests: XCTestCase {
         XCTAssertEqual(comps.day,   15)
         XCTAssertEqual(comps.hour,  9)
         XCTAssertEqual(comps.minute, 0)
+    }
+
+    // MARK: - Helpers (extended)
+
+    func at(_ hour: Int, _ minute: Int = 0, daysFromNow: Int = 0) -> Date {
+        var comps = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        comps.hour = hour; comps.minute = minute; comps.second = 0
+        var d = Calendar.current.date(from: comps)!
+        if daysFromNow != 0 { d = Calendar.current.date(byAdding: .day, value: daysFromNow, to: d)! }
+        return d
+    }
+
+    /// Builds a 7-day array where Wednesday is guaranteed to be included.
+    /// Used for suggestNewMeal tests that parse a "WED HH:mm" slot string.
+    func makeWeekContainingWednesday() -> [Date] {
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let weekday = cal.component(.weekday, from: today) // 1=Sun … 4=Wed … 7=Sat
+        let daysToWed = (4 - weekday + 7) % 7
+        let wednesday = daysToWed == 0 ? today : cal.date(byAdding: .day, value: daysToWed, to: today)!
+        let start = cal.date(byAdding: .day, value: -3, to: wednesday)!
+        return (0..<7).compactMap { cal.date(byAdding: .day, value: $0, to: start) }
+    }
+
+    // MARK: - analyzeHabits
+
+    func testAnalyzeHabitsBuildsCorrectPayload() async throws {
+        var captured = ""
+        var service = AIService(apiKey: "test-key")
+        service._callAPI = { msg in captured = msg; return "Great week!" }
+
+        let summary = HabitWeekSummary(name: "Gym", type: .good, weekTotal: 4, priorWeekTotal: 2)
+        _ = try await service.analyzeHabits([summary])
+
+        XCTAssertTrue(captured.contains("HABITS_WEEK:"), "Payload missing HABITS_WEEK header")
+        XCTAssertTrue(captured.contains("Gym=4"),        "Payload missing habit name and count")
+        XCTAssertTrue(captured.contains("↑"),            "Payload missing up-trend indicator")
+    }
+
+    func testAnalyzeHabitsDownTrendIndicator() async throws {
+        var captured = ""
+        var service = AIService(apiKey: "test-key")
+        service._callAPI = { msg in captured = msg; return "Keep it up!" }
+
+        let summary = HabitWeekSummary(name: "Smoking", type: .bad, weekTotal: 2, priorWeekTotal: 5)
+        _ = try await service.analyzeHabits([summary])
+
+        XCTAssertTrue(captured.contains("↓"))
+    }
+
+    func testAnalyzeHabitsEmptySummariesReturnsEmptyString() async throws {
+        let service = AIService(apiKey: "test-key")
+        let result = try await service.analyzeHabits([])
+        XCTAssertEqual(result, "")
+    }
+
+    func testAnalyzeHabitsReturnsRawTextFromAPI() async throws {
+        var service = AIService(apiKey: "test-key")
+        let expected = "You're crushing it this week!"
+        service._callAPI = { _ in expected }
+
+        let summary = HabitWeekSummary(name: "Sleep", type: .good, weekTotal: 7, priorWeekTotal: 5)
+        let result = try await service.analyzeHabits([summary])
+        XCTAssertEqual(result, expected)
+    }
+
+    // MARK: - suggestNewMeal
+
+    func testSuggestNewMealParsesSuccessfulResponse() async throws {
+        let json = """
+        {
+          "meal": {
+            "name": "Thai Green Curry",
+            "prepTimeMinutes": 40,
+            "tags": ["spicy", "one-pot"],
+            "scheduledSlot": "WED 20:00"
+          }
+        }
+        """
+        var service = AIService(apiKey: "test-key")
+        service._callAPI = { _ in json }
+        let prefs = makePrefs()
+
+        let result = try await service.suggestNewMeal(
+            existingMeals: [],
+            freeDinnerSlots: [],
+            preferences: prefs,
+            referenceWeek: makeWeekContainingWednesday()
+        )
+
+        XCTAssertEqual(result.meal.name, "Thai Green Curry")
+        XCTAssertEqual(result.meal.prepTimeMinutes, 40)
+        XCTAssertEqual(result.meal.tags, ["spicy", "one-pot"])
+
+        let comps = Calendar.current.dateComponents([.hour, .minute], from: result.scheduledStart)
+        XCTAssertEqual(comps.hour,   20)
+        XCTAssertEqual(comps.minute, 0)
+    }
+
+    func testSuggestNewMealSetsIsUserDefinedFalse() async throws {
+        let json = """
+        {
+          "meal": {
+            "name": "Shakshuka",
+            "prepTimeMinutes": 25,
+            "tags": [],
+            "scheduledSlot": "WED 19:30"
+          }
+        }
+        """
+        var service = AIService(apiKey: "test-key")
+        service._callAPI = { _ in json }
+
+        let result = try await service.suggestNewMeal(
+            existingMeals: [], freeDinnerSlots: [],
+            preferences: makePrefs(), referenceWeek: makeWeekContainingWednesday()
+        )
+
+        XCTAssertFalse(result.meal.isUserDefined, "AI-suggested meals must have isUserDefined = false")
+    }
+
+    func testSuggestNewMealThrowsOnMalformedJSON() async {
+        var service = AIService(apiKey: "test-key")
+        service._callAPI = { _ in "not json {{" }
+
+        do {
+            _ = try await service.suggestNewMeal(
+                existingMeals: [], freeDinnerSlots: [],
+                preferences: makePrefs(), referenceWeek: makeWeekContainingWednesday()
+            )
+            XCTFail("Should have thrown")
+        } catch AIServiceError.invalidResponse {
+            // expected
+        } catch {
+            XCTFail("Wrong error type: \(error)")
+        }
+    }
+
+    func testSuggestNewMealThrowsWhenSlotNotInReferenceWeek() async {
+        // The slot says "WED" but we pass an empty reference week → parseSlot returns nil
+        let json = """
+        {
+          "meal": {
+            "name": "Curry",
+            "prepTimeMinutes": 30,
+            "tags": [],
+            "scheduledSlot": "WED 20:00"
+          }
+        }
+        """
+        var service = AIService(apiKey: "test-key")
+        service._callAPI = { _ in json }
+
+        do {
+            _ = try await service.suggestNewMeal(
+                existingMeals: [], freeDinnerSlots: [],
+                preferences: makePrefs(), referenceWeek: [] // empty → slot not found
+            )
+            XCTFail("Should have thrown")
+        } catch AIServiceError.invalidResponse {
+            // expected
+        } catch {
+            XCTFail("Wrong error type: \(error)")
+        }
+    }
+
+    // MARK: - moveEvent
+
+    func testMoveEventBuildsMessageContainingAnchorAndReason() async throws {
+        var captured = ""
+        var service = AIService(apiKey: "test-key")
+        service._callAPI = { msg in captured = msg; return self.addJSON() }
+
+        let prefs = makePrefs()
+        let event = Event(title: "Work Meeting", startTime: at(14), endTime: at(15))
+        context.insert(event)
+
+        _ = try await service.moveEvent(event: event, reason: "dentist conflict", allEvents: [event], preferences: prefs)
+
+        XCTAssertTrue(captured.contains("ANCHOR_EVENT:"),    "Message missing ANCHOR_EVENT header")
+        XCTAssertTrue(captured.contains("Work Meeting"),     "Message missing event title")
+        XCTAssertTrue(captured.contains("dentist conflict"), "Message missing move reason")
+    }
+
+    // MARK: - rescheduleMissed
+
+    func testRescheduleMissedBuildsMessageWithMissedCount() async throws {
+        var captured = ""
+        var service = AIService(apiKey: "test-key")
+        service._callAPI = { msg in captured = msg; return self.addJSON() }
+
+        let prefs = makePrefs()
+        let event = Event(title: "Gym", startTime: at(7, daysFromNow: -1), endTime: at(8, daysFromNow: -1))
+        event.status = .missed
+        context.insert(event)
+
+        _ = try await service.rescheduleMissed(event: event, missedCount: 3, allEvents: [], preferences: prefs)
+
+        XCTAssertTrue(captured.contains("MISSED_EVENT:"), "Message missing MISSED_EVENT header")
+        XCTAssertTrue(captured.contains("missed_count=3"), "Message missing missed count")
+        XCTAssertTrue(captured.contains("Gym"),            "Message missing event title")
     }
 }

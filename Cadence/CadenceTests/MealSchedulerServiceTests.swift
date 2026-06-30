@@ -173,7 +173,7 @@ final class MealSchedulerServiceTests: XCTestCase {
         XCTAssertEqual(result.count, 1, "Missed events should not block breakfast scheduling")
     }
 
-    func testBreakfastDurationCappedAt30Min() {
+    func testBreakfastDurationCappedAt30Min() throws {
         let prefs = makePrefs()
         prefs.breakfastEnabled = true
         prefs.breakfastHour = 8
@@ -182,7 +182,8 @@ final class MealSchedulerServiceTests: XCTestCase {
         let targetDate = Calendar.current.startOfDay(for: Date())
         let result = service.scheduleBreakfastIfNeeded(existingEvents: [], preferences: prefs, targetDates: [targetDate])
 
-        XCTAssertEqual(result.first?.endTime.timeIntervalSince(result.first!.startTime), 30 * 60, accuracy: 1)
+        let event = try XCTUnwrap(result.first, "Expected a breakfast event to be created")
+        XCTAssertEqual(event.endTime.timeIntervalSince(event.startTime), 30 * 60, accuracy: 1)
     }
 
     // MARK: - Dinner: free slot selection
@@ -332,5 +333,114 @@ final class MealSchedulerServiceTests: XCTestCase {
         let e = makeEvent(title: "Breakfast", start: start, end: start.addingTimeInterval(30 * 60), status: .completed, source: .ai)
         let count = service.breakfastMissedStreakCount(events: [e])
         XCTAssertEqual(count, 0)
+    }
+
+    // MARK: - remainingDinnerSlots
+
+    func testRemainingDinnerSlotsReturnsFullWindowWhenNoEvents() {
+        let prefs = makePrefs()
+        prefs.dinnerWindowStartHour = 19
+        prefs.dinnerWindowEndHour = 22
+        prefs.bufferMinutes = 0
+
+        let dates = [Calendar.current.startOfDay(for: Date())]
+        let slots = service.remainingDinnerSlots(
+            for: dates,
+            existingEvents: [],
+            scheduledDinnerEvents: [],
+            preferences: prefs,
+            minimumMinutes: 30
+        )
+
+        XCTAssertEqual(slots.count, 1)
+        XCTAssertEqual(slots[0].duration, 3 * 3600, accuracy: 1) // 19:00–22:00 = 3 hours
+    }
+
+    func testRemainingDinnerSlotsIsEmptyWhenWindowFull() {
+        let prefs = makePrefs()
+        prefs.dinnerWindowStartHour = 19
+        prefs.dinnerWindowEndHour = 22
+        prefs.bufferMinutes = 0
+
+        let block = makeEvent(start: at(19), end: at(22))
+        let dates = [Calendar.current.startOfDay(for: Date())]
+
+        let slots = service.remainingDinnerSlots(
+            for: dates,
+            existingEvents: [block],
+            scheduledDinnerEvents: [],
+            preferences: prefs,
+            minimumMinutes: 30
+        )
+        XCTAssertTrue(slots.isEmpty)
+    }
+
+    func testRemainingDinnerSlotsAccountsForScheduledDinnerEvents() {
+        let prefs = makePrefs()
+        prefs.dinnerWindowStartHour = 19
+        prefs.dinnerWindowEndHour = 22
+        prefs.bufferMinutes = 0
+
+        // A dinner event already fills 19:00–20:30
+        let scheduled = makeEvent(start: at(19), end: at(20, 30), source: .ai)
+        let dates = [Calendar.current.startOfDay(for: Date())]
+
+        let slots = service.remainingDinnerSlots(
+            for: dates,
+            existingEvents: [],
+            scheduledDinnerEvents: [scheduled],
+            preferences: prefs,
+            minimumMinutes: 30 // 20:30–22:00 = 90 min → should find a slot
+        )
+        XCTAssertFalse(slots.isEmpty)
+    }
+
+    func testRemainingDinnerSlotsMissedEventDoesNotBlock() {
+        let prefs = makePrefs()
+        prefs.dinnerWindowStartHour = 19
+        prefs.dinnerWindowEndHour = 22
+        prefs.bufferMinutes = 0
+
+        let missed = makeEvent(start: at(19), end: at(22), status: .missed)
+        let dates = [Calendar.current.startOfDay(for: Date())]
+
+        let slots = service.remainingDinnerSlots(
+            for: dates,
+            existingEvents: [missed],
+            scheduledDinnerEvents: [],
+            preferences: prefs,
+            minimumMinutes: 30
+        )
+        // Missed events don't block the window
+        XCTAssertFalse(slots.isEmpty)
+    }
+
+    // MARK: - nearestUpcomingMeal
+
+    func testNearestUpcomingMealReturnsNilForEmptyList() {
+        XCTAssertNil(service.nearestUpcomingMeal(from: []))
+    }
+
+    func testNearestUpcomingMealReturnsSoonestPendingFutureEvent() {
+        let sooner = makeEvent(title: "Breakfast", start: at(8, daysFromNow: 1), end: at(8, 30, daysFromNow: 1))
+        let later  = makeEvent(title: "Dinner",    start: at(19, daysFromNow: 1), end: at(20, daysFromNow: 1))
+
+        let result = service.nearestUpcomingMeal(from: [later, sooner])
+        XCTAssertEqual(result?.title, "Breakfast")
+    }
+
+    func testNearestUpcomingMealIgnoresPastEvents() {
+        let past = makeEvent(title: "Breakfast", start: at(8, daysFromNow: -1), end: at(8, 30, daysFromNow: -1))
+        XCTAssertNil(service.nearestUpcomingMeal(from: [past]))
+    }
+
+    func testNearestUpcomingMealIgnoresMissedFutureEvents() {
+        let missed = makeEvent(title: "Dinner", start: at(19, daysFromNow: 1), end: at(20, daysFromNow: 1), status: .missed)
+        XCTAssertNil(service.nearestUpcomingMeal(from: [missed]))
+    }
+
+    func testNearestUpcomingMealReturnsNilWhenAllEventsAreCompleted() {
+        let done = makeEvent(title: "Breakfast", start: at(8, daysFromNow: 1), end: at(8, 30, daysFromNow: 1), status: .completed)
+        XCTAssertNil(service.nearestUpcomingMeal(from: [done]))
     }
 }

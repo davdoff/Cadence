@@ -13,10 +13,6 @@ struct WeeklyMealsView: View {
 
     private var prefs: UserPreferences? { prefsResults.first }
 
-    private var apiKey: String {
-        Bundle.main.object(forInfoDictionaryKey: "ANTHROPIC_API_KEY") as? String ?? ""
-    }
-
     private var weekDates: [Date] {
         let cal = Calendar.current
         let today = cal.startOfDay(for: Date())
@@ -246,7 +242,7 @@ struct WeeklyMealsView: View {
 
         let mealCategory = categories.first { $0.name == "Meal" }
         let coordinator = MealPlanningCoordinator(
-            aiService: AIService(apiKey: apiKey),
+            aiService: AIService(),
             mealCategory: mealCategory
         )
         let result = await coordinator.runWeeklyPass(

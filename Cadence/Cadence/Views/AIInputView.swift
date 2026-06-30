@@ -14,10 +14,6 @@ struct AIInputView: View {
     @State private var decision: SchedulingDecision?
     @State private var errorMessage: String?
 
-    private var apiKey: String {
-        Bundle.main.object(forInfoDictionaryKey: "ANTHROPIC_API_KEY") as? String ?? ""
-    }
-
     var body: some View {
         NavigationStack {
             ZStack {
@@ -71,7 +67,7 @@ struct AIInputView: View {
     }
 
     private var canSubmit: Bool {
-        !description.trimmingCharacters(in: .whitespaces).isEmpty && !apiKey.isEmpty
+        !description.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     // MARK: - Result views
@@ -209,12 +205,6 @@ struct AIInputView: View {
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 24)
-            if apiKey.isEmpty {
-                Text("ANTHROPIC_API_KEY not set in Info.plist")
-                    .font(.caption)
-                    .foregroundColor(.red)
-                    .padding(.top, 4)
-            }
         }
         .frame(maxWidth: .infinity)
         .padding(32)
@@ -243,7 +233,7 @@ struct AIInputView: View {
         errorMessage = nil
         isLoading = true
 
-        let service = AIService(apiKey: apiKey)
+        let service = AIService()
         let prefs   = prefsResults.first ?? UserPreferences()
         let events  = allEvents
         let cats    = Array(categories)

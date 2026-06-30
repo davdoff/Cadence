@@ -10,7 +10,7 @@ final class SchedulerServiceTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        let schema = Schema([Event.self, Category.self, Meal.self, UserPreferences.self])
+        let schema = Schema([Event.self, Cadence.Category.self, Meal.self, UserPreferences.self])
         let config = ModelConfiguration(isStoredInMemoryOnly: true)
         container = try! ModelContainer(for: schema, configurations: config)
         context = ModelContext(container)
@@ -169,7 +169,7 @@ final class SchedulerServiceTests: XCTestCase {
 
     func testPreferenceStringIncludesPriorityCategories() {
         let prefs = makePrefs()
-        let cat = Category(name: "Work", colorHex: "#FF0000")
+        let cat = Cadence.Category(name: "Work", colorHex: "#FF0000")
         context.insert(cat)
         prefs.priorityCategoryIDs = [cat.id]
         let output = service.compactPreferenceString(from: prefs, priorityCategories: [cat])

@@ -32,21 +32,31 @@ struct SchedulingContextBuilder {
         return f
     }()
 
+    private static let nowFmt: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        f.timeZone = .current
+        return f
+    }()
+
     func build(_ intent: SchedulingIntent, preferences: UserPreferences) -> String {
+        let now = "NOW: \(Self.nowFmt.string(from: Date.now))"
+        let body: String
         switch intent {
         case .mealSuggestion(let meals, let slots):
-            return buildMealSuggestion(meals: meals, slots: slots, preferences: preferences)
+            body = buildMealSuggestion(meals: meals, slots: slots, preferences: preferences)
         case .addToFreeSlot(let description, let freeSlots):
-            return buildAddToFreeSlot(description: description, freeSlots: freeSlots, preferences: preferences)
+            body = buildAddToFreeSlot(description: description, freeSlots: freeSlots, preferences: preferences)
         case .moveEvent(let event, let reason, let surrounding, let freeSlots):
-            return buildMoveEvent(event: event, reason: reason, surroundingEvents: surrounding, freeSlots: freeSlots, preferences: preferences)
+            body = buildMoveEvent(event: event, reason: reason, surroundingEvents: surrounding, freeSlots: freeSlots, preferences: preferences)
         case .rescheduleMissed(let event, let missedCount, let freeSlots):
-            return buildRescheduleMissed(event: event, missedCount: missedCount, freeSlots: freeSlots, preferences: preferences)
+            body = buildRescheduleMissed(event: event, missedCount: missedCount, freeSlots: freeSlots, preferences: preferences)
         case .habitWeeklyAnalysis(let habits):
-            return buildHabitAnalysis(habits: habits)
+            body = buildHabitAnalysis(habits: habits)
         case .deepProjectPlan(let goal, let deadline, let weeklyHours, let constraints):
-            return buildDeepProjectPlan(goal: goal, deadline: deadline, weeklyHours: weeklyHours, constraints: constraints)
+            body = buildDeepProjectPlan(goal: goal, deadline: deadline, weeklyHours: weeklyHours, constraints: constraints)
         }
+        return "\(now)\n\(body)"
     }
 
     // MARK: - Builders

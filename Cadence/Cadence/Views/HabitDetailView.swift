@@ -12,9 +12,6 @@ struct HabitDetailView: View {
     @State private var analysisError: String? = nil
 
     private var accent: Color { Color(hex: habit.colorHex) }
-    private var apiKey: String {
-        Bundle.main.object(forInfoDictionaryKey: "ANTHROPIC_API_KEY") as? String ?? ""
-    }
 
     var body: some View {
         ZStack {
@@ -310,12 +307,8 @@ struct HabitDetailView: View {
                     .foregroundColor(.white)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 10)
-                    .background(apiKey.isEmpty ? Color.secondary : accent)
+                    .background(accent)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .disabled(apiKey.isEmpty)
-                if apiKey.isEmpty {
-                    Text("ANTHROPIC_API_KEY not set in Info.plist").font(.caption2).foregroundColor(.red)
-                }
             }
         }
         .padding()
@@ -334,9 +327,8 @@ struct HabitDetailView: View {
     }
 
     private func runAnalysis() {
-        guard !apiKey.isEmpty else { return }
         isAnalyzing = true; analysisError = nil
-        let service = AIService(apiKey: apiKey)
+        let service = AIService()
         let summary = habit.weekSummary()
         Task {
             do {

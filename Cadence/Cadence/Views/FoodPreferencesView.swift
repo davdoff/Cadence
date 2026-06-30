@@ -9,10 +9,6 @@ struct FoodPreferencesView: View {
     @Environment(\.modelContext) private var context
     @AppStorage("accentColorHex") private var accentColorHex = "#E8784D"
 
-    private var apiKey: String {
-        Bundle.main.object(forInfoDictionaryKey: "ANTHROPIC_API_KEY") as? String ?? ""
-    }
-
     @State private var breakfastEnabled = true
     @State private var breakfastTime = Date()
     @State private var dinnerStart = Date()
@@ -240,7 +236,7 @@ struct FoodPreferencesView: View {
         guard let p = prefs else { return }
         let mealCategory = categories.first { $0.name == "Meal" }
         let coordinator = MealPlanningCoordinator(
-            aiService: AIService(apiKey: apiKey),
+            aiService: AIService(),
             mealCategory: mealCategory
         )
         let events = allEvents

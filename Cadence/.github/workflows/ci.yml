@@ -1,0 +1,161 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# CI Workflow for Cadence
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# WHAT IS A GITHUB ACTIONS WORKFLOW?
+# A workflow is this whole file. GitHub reads it and runs it automatically
+# whenever the trigger conditions are met (defined under `on:` below).
+# Think of it as a recipe: "when X happens, do Y in this order."
+#
+# WHAT IS A JOB?
+# A job is a group of steps that run on a single virtual machine (called a
+# "runner"). Jobs run in parallel by default. Use `needs:` to make one job
+# wait for another. This file has three jobs: lint → test → build.
+# Running them in order means if linting fails you never waste CI minutes
+# spinning up a test runner.
+#
+# WHAT IS A STEP?
+# A step is a single shell command (run:) or a pre-packaged action (uses:).
+# Steps inside a job run sequentially on the same machine. If one step
+# fails, the remaining steps in that job are skipped.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: CI
+
+# TRIGGER: run this workflow on every pull request that targets main or dev.
+# This is the key guard — you never merge broken code because the PR can't
+# be green until all three jobs pass.
+on:
+  pull_request:
+    branches:
+      - main
+      - dev
+
+jobs:
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # JOB 1 — SwiftLint
+  # Catches style issues before we spend time running tests or building.
+  # Fast feedback: if you forgot a trailing newline or have a long line,
+  # you find out in ~60 seconds instead of waiting for the full test run.
+  # ───────────────────────────────────────────────────────────────────────────
+  lint:
+    name: SwiftLint
+    runs-on: macos-15
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Install SwiftLint
+        run: brew install swiftlint
+
+      - name: Run SwiftLint
+        # --reporter github-actions-logging annotates the PR diff inline
+        # with exactly which line the violation is on.
+        run: swiftlint lint --reporter github-actions-logging
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # JOB 2 — Unit Tests
+  # Runs only after lint passes (needs: lint).
+  #
+  # WHY UNIT TESTS AND NOT INTEGRATION TESTS IN CI?
+  # Integration tests call the real Claude API. Three problems:
+  #   1. Cost — every CI run burns real API tokens.
+  #   2. Flakiness — the API is non-deterministic; tests that pass locally
+  #      can fail in CI for no code-related reason, making CI unreliable.
+  #   3. Secrets — the API key would have to live in GitHub Secrets and be
+  #      exposed to every branch that opens a PR.
+  # Unit tests use MockAIService returning fixed JSON fixtures — they are
+  # deterministic, free to run, and require no secrets.
+  # ───────────────────────────────────────────────────────────────────────────
+  test:
+    name: Unit Tests
+    runs-on: macos-15
+    needs: lint   # don't bother testing if linting failed
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      # Install xcpretty so test output is readable in the GitHub log.
+      # Without this, xcodebuild output is hundreds of lines of raw compiler
+      # noise for even a tiny project.
+      - name: Install xcpretty
+        run: gem install xcpretty --no-document
+
+      - name: Run unit tests
+        # set -o pipefail: if xcodebuild exits non-zero, the whole command
+        # fails even when piping through xcpretty. Without this flag, a
+        # failed test suite would still show exit code 0 from xcpretty.
+        #
+        # -only-testing:CadenceTests excludes CadenceUITests.
+        # UI tests require a running simulator with the full app installed;
+        # they're slow and fragile in CI. Add them back once the app is stable.
+        #
+        # CODE_SIGNING_ALLOWED=NO: CI runners can't sign apps. This flag
+        # tells xcodebuild to skip signing for simulator builds.
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project Cadence.xcodeproj \
+            -scheme Cadence \
+            -destination 'platform=iOS Simulator,name=iPhone 16,OS=18.5' \
+            -only-testing:CadenceTests \
+            CODE_SIGNING_ALLOWED=NO \
+            | xcpretty
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # JOB 3 — Build Check
+  # Runs only after tests pass (needs: test).
+  # Purpose: verify that the app compiles cleanly for the app target even if
+  # there is somehow a compile error that only shows up in the app target and
+  # not in the test target. Also catches missing entitlements, missing asset
+  # catalog entries, and similar Xcode project problems.
+  #
+  # WHY IS BUILD A SEPARATE JOB AND NOT JUST ANOTHER STEP IN test?
+  # Separation means GitHub shows three distinct status badges on the PR:
+  # SwiftLint ✓  Unit Tests ✓  Build ✓
+  # This makes it obvious at a glance which stage failed when something goes
+  # wrong, and each stage can be set as an independent required status check
+  # in the branch protection rules.
+  # ───────────────────────────────────────────────────────────────────────────
+  build:
+    name: Build Check
+    runs-on: macos-15
+    needs: test
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Install xcpretty
+        run: gem install xcpretty --no-document
+
+      - name: Build app target
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project Cadence.xcodeproj \
+            -scheme Cadence \
+            -destination 'platform=iOS Simulator,name=iPhone 16,OS=18.5' \
+            CODE_SIGNING_ALLOWED=NO \
+            | xcpretty
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WHAT IS A PROTECTED BRANCH + REQUIRED STATUS CHECK?
+# ─────────────────────────────────────────────────────────────────────────────
+# On GitHub → Settings → Branches → Add rule for `main`:
+#   • "Require a pull request before merging" — forces all changes through PRs,
+#     preventing direct pushes to main even from you.
+#   • "Require status checks to pass before merging" → add the three jobs
+#     above (SwiftLint, Unit Tests, Build Check) as required checks.
+#
+# For a solo developer this still matters:
+#   • It's a safety net against merging in a hurry — you physically cannot
+#     merge until the green checks appear.
+#   • It builds a muscle memory of "CI must be green before I ship."
+#   • It means your main branch is always in a buildable, tested state,
+#     which is important when you eventually add collaborators or submit
+#     for App Store review.
+# ─────────────────────────────────────────────────────────────────────────────

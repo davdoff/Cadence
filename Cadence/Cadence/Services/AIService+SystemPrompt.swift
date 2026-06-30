@@ -71,7 +71,7 @@ extension AIService {
       "alternatives": [{ "start": "ISO8601", "end": "ISO8601" }]
     }
 
-    ISO8601 format: YYYY-MM-DDTHH:mm:ssZ (always UTC).
+    ISO8601 format: YYYY-MM-DDTHH:mm:ss±HH:MM — always use the UTC offset from the NOW field, never Z.
     Use "add" when the slot is free — populate event, set conflict_reason to null, alternatives to [].
     Use "conflict" when the slot is taken — populate conflict_reason and up to 3 alternatives, event may be null.
     Use "suggest_alternative" when no specific time was requested — provide 2-3 options, event may be null.
