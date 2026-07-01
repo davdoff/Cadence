@@ -2,6 +2,7 @@ import SwiftUI
 
 struct EventRowView: View {
     let event: Event
+    var onEdit: (() -> Void)? = nil
 
     private var timeRange: String {
         let f = DateFormatter()
@@ -26,6 +27,18 @@ struct EventRowView: View {
             }
 
             Spacer()
+
+            if let onEdit {
+                Button(action: onEdit) {
+                    Image(systemName: "pencil")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.secondary)
+                        .padding(8)
+                        .background(Color.cadenceCreamDeep)
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+            }
 
             statusBadge
         }

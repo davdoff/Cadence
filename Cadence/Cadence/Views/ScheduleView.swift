@@ -7,6 +7,7 @@ struct ScheduleView: View {
 
     @State private var selectedDate = Date.now
     @State private var selectedCategory: Category?
+    @State private var editingEvent: Event?
 
     var body: some View {
         ZStack {
@@ -69,6 +70,9 @@ struct ScheduleView: View {
                         .foregroundColor(.cadenceOrange)
                 }
             }
+        }
+        .sheet(item: $editingEvent) { event in
+            AddEventView(editingEvent: event)
         }
     }
 
@@ -228,7 +232,7 @@ struct ScheduleView: View {
                 ScrollView {
                     LazyVStack(spacing: 10) {
                         ForEach(filteredDayEvents) { event in
-                            EventRowView(event: event)
+                            EventRowView(event: event, onEdit: { editingEvent = event })
                                 .padding(.horizontal)
                         }
                     }

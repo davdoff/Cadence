@@ -10,6 +10,7 @@ struct AddEventView: View {
     @Query private var prefsResults: [UserPreferences]
 
     var prefillTitle: String = ""
+    var editingEvent: Event? = nil
 
     @State private var title = ""
     @State private var selectedDate = Date.now
@@ -57,7 +58,7 @@ struct AddEventView: View {
                 }
                 .scrollContentBackground(.hidden)
             }
-            .navigationTitle("Add Event")
+            .navigationTitle(editingEvent == nil ? "Add Event" : "Edit Event")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -71,13 +72,21 @@ struct AddEventView: View {
                 }
             }
             .alert("Scheduling Conflict", isPresented: $showConflictAlert) {
-                Button("Save Anyway") { forceInsert() }
+                Button("Save Anyway") { editingEvent == nil ? forceInsert() : forceUpdate() }
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("This overlaps with: \(conflictNames). Save anyway?")
             }
             .onAppear {
-                if !prefillTitle.isEmpty { title = prefillTitle }
+                if let ev = editingEvent {
+                    title = ev.title
+                    selectedDate = ev.startTime
+                    startTime = ev.startTime
+                    endTime = ev.endTime
+                    selectedCategory = ev.category
+                } else if !prefillTitle.isEmpty {
+                    title = prefillTitle
+                }
             }
         }
     }
@@ -96,10 +105,12 @@ struct AddEventView: View {
     private func attemptSave() {
         let prefs    = prefsResults.first ?? UserPreferences()
         let proposal = DateInterval(start: combinedStart, end: combinedEnd)
-        let hits     = SchedulerService().conflicts(for: proposal, in: allEvents, bufferMinutes: prefs.bufferMinutes)
+        // Exclude the event being edited from conflict check
+        let others   = editingEvent.map { ev in allEvents.filter { $0.id != ev.id } } ?? allEvents
+        let hits     = SchedulerService().conflicts(for: proposal, in: others, bufferMinutes: prefs.bufferMinutes)
 
         if hits.isEmpty {
-            forceInsert()
+            editingEvent == nil ? forceInsert() : forceUpdate()
         } else {
             conflictNames = hits.map(\.title).joined(separator: ", ")
             showConflictAlert = true
@@ -122,6 +133,36 @@ struct AddEventView: View {
             )
             svc.scheduleMissedEventAlert(for: event)
         }
+        try? context.save()
+        dismiss()
+    }
+
+    private func forceUpdate() {
+        guard let event = editingEvent else { return }
+        let prefs = prefsResults.first ?? UserPreferences()
+        let svc = NotificationService()
+
+        let timeChanged = event.startTime != combinedStart || event.endTime != combinedEnd
+
+        event.title = title.trimmingCharacters(in: .whitespaces)
+        event.category = selectedCategory
+
+        if timeChanged {
+            svc.cancelEventNotifications(for: event)
+            event.startTime = combinedStart
+            event.endTime = combinedEnd
+            event.status = .pending
+            if svc.isNotificationEnabled(for: event, prefs: prefs) {
+                event.notificationIdentifier = svc.scheduleEventReminder(
+                    for: event, reminderMinutes: prefs.defaultReminderMinutes
+                )
+                svc.scheduleMissedEventAlert(for: event)
+            }
+        } else {
+            event.startTime = combinedStart
+            event.endTime = combinedEnd
+        }
+
         try? context.save()
         dismiss()
     }
