@@ -4,6 +4,7 @@ import SwiftData
 struct ScheduleView: View {
     @Query(sort: \Event.startTime) private var allEvents: [Event]
     @Query private var categories: [Category]
+    @Environment(\.modelContext) private var context
 
     @State private var selectedDate = Date.now
     @State private var selectedCategory: Category?
@@ -79,21 +80,28 @@ struct ScheduleView: View {
     // MARK: - Week strip
 
     private var weekDates: [Date] {
-        let start = Calendar.current.date(
-            byAdding: .day, value: -3,
-            to: Calendar.current.startOfDay(for: selectedDate)
-        )!
-        return (0..<7).compactMap { Calendar.current.date(byAdding: .day, value: $0, to: start) }
+        let today = Calendar.current.startOfDay(for: .now)
+        return (-90...90).compactMap { Calendar.current.date(byAdding: .day, value: $0, to: today) }
     }
 
     private var weekStrip: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                ForEach(weekDates, id: \.self) { date in
-                    dayPill(date)
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(weekDates, id: \.self) { date in
+                        dayPill(date).id(date)
+                    }
+                }
+                .padding(.horizontal, 16)
+            }
+            .onAppear {
+                proxy.scrollTo(Calendar.current.startOfDay(for: selectedDate), anchor: .center)
+            }
+            .onChange(of: selectedDate) { _, new in
+                withAnimation(.spring(duration: 0.25)) {
+                    proxy.scrollTo(Calendar.current.startOfDay(for: new), anchor: .center)
                 }
             }
-            .padding(.horizontal, 16)
         }
     }
 
@@ -218,27 +226,40 @@ struct ScheduleView: View {
 
     // MARK: - Day event list
 
+    @ViewBuilder
     private var dayEventList: some View {
-        Group {
-            if filteredDayEvents.isEmpty {
-                VStack(spacing: 12) {
-                    Image(systemName: "moon.zzz")
-                        .font(.system(size: 40)).foregroundColor(.cadenceOrangeLight)
-                    Text(selectedCategory == nil ? "No events" : "No \(selectedCategory!.name) events")
-                        .font(.subheadline).foregroundColor(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: 10) {
-                        ForEach(filteredDayEvents) { event in
-                            EventRowView(event: event, onEdit: { editingEvent = event })
-                                .padding(.horizontal)
+        if filteredDayEvents.isEmpty {
+            VStack(spacing: 12) {
+                Image(systemName: "moon.zzz")
+                    .font(.system(size: 40)).foregroundColor(.cadenceOrangeLight)
+                Text(selectedCategory == nil ? "No events" : "No \(selectedCategory!.name) events")
+                    .font(.subheadline).foregroundColor(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            List {
+                ForEach(filteredDayEvents) { event in
+                    EventRowView(event: event, onEdit: { editingEvent = event })
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button(role: .destructive) {
+                                deleteEvent(event)
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
                         }
-                    }
-                    .padding(.vertical, 12)
                 }
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
         }
+    }
+
+    private func deleteEvent(_ event: Event) {
+        NotificationService().cancelEventNotifications(for: event)
+        context.delete(event)
+        try? context.save()
     }
 }
