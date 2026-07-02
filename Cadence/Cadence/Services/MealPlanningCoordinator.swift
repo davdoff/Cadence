@@ -1,11 +1,13 @@
 import Foundation
 import WidgetKit
 
-/// Orchestrates the weekly meal scheduling pass:
-/// breakfast scheduling → dinner scheduling → optional AI new-meal suggestion →
-/// notification wiring → widget update.
+/// Orchestrates the daily meal scheduling pass for today only:
+/// stale future-meal cleanup → breakfast scheduling → dinner scheduling →
+/// optional AI new-meal suggestion → notification wiring → widget update.
 ///
-/// Call `runWeeklyPass` on app launch and whenever the schedule changes.
+/// Meals are planned at day start rather than a week ahead, so they never
+/// block future timeslots. Call `runDailyPass` on app launch and whenever
+/// a new day begins.
 @MainActor
 final class MealPlanningCoordinator {
 
@@ -19,22 +21,38 @@ final class MealPlanningCoordinator {
         self.mealCategory = mealCategory
     }
 
-    /// Full weekly meal scheduling pass. Returns the newly created events so the caller
-    /// can insert them into the SwiftData context.
-    func runWeeklyPass(
+    /// Daily meal scheduling pass for today. Returns the newly created events so the caller
+    /// can insert them into the SwiftData context, plus stale future meal events to delete.
+    func runDailyPass(
         existingEvents: [Event],
         allMeals: [Meal],
         preferences: UserPreferences
-    ) async -> WeeklyPassResult {
+    ) async -> DailyPassResult {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
-        let targetDates = (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: today) }
+        let targetDates = [today]
+
+        // 0. Cleanup — pending AI meal events on future days (leftovers from the old
+        // week-ahead planning). Cancel their notifications and hand them back for deletion.
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: today)!
+        let staleFutureMeals = existingEvents.filter {
+            $0.source == .ai &&
+            $0.status == .pending &&
+            $0.category?.name == "Meal" &&
+            $0.startTime >= tomorrow
+        }
+        for event in staleFutureMeals {
+            notifications.cancelEventNotifications(for: event)
+        }
+        let remainingEvents = existingEvents.filter { event in
+            !staleFutureMeals.contains { $0.id == event.id }
+        }
 
         var newEvents: [Event] = []
 
         // 1. Breakfast
         let breakfastEvents = mealScheduler.scheduleBreakfastIfNeeded(
-            existingEvents: existingEvents,
+            existingEvents: remainingEvents,
             preferences: preferences,
             targetDates: targetDates
         )
@@ -46,7 +64,7 @@ final class MealPlanningCoordinator {
         newEvents.append(contentsOf: breakfastEvents)
 
         // Check breakfast missed streak
-        let streak = mealScheduler.breakfastMissedStreakCount(events: existingEvents + breakfastEvents)
+        let streak = mealScheduler.breakfastMissedStreakCount(events: remainingEvents + breakfastEvents)
         if streak >= 3 {
             notifications.scheduleBreakfastMissedNudge(
                 breakfastHour: preferences.breakfastHour,
@@ -59,7 +77,7 @@ final class MealPlanningCoordinator {
         // 2. Dinner — use knownMealIDs to filter the meal list
         let knownMealSet = Set(preferences.knownMealIDs)
         let cookableMeals = allMeals.filter { knownMealSet.contains($0.id) }
-        let allExistingForDinner = existingEvents + breakfastEvents
+        let allExistingForDinner = remainingEvents + breakfastEvents
         let dinnerEvents = mealScheduler.scheduleDinnerSlots(
             existingEvents: allExistingForDinner,
             meals: cookableMeals,
@@ -73,7 +91,7 @@ final class MealPlanningCoordinator {
         }
         newEvents.append(contentsOf: dinnerEvents)
 
-        // 3. AI new-meal suggestion (once per week)
+        // 3. AI new-meal suggestion (once per week, placed in today's free dinner slots)
         var newMeal: Meal?
         var newMealEvent: Event?
 
@@ -117,7 +135,7 @@ final class MealPlanningCoordinator {
         }
 
         // 4. Widget — nearest upcoming meal
-        let allMealEvents = existingEvents + newEvents
+        let allMealEvents = remainingEvents + newEvents
         if let nearest = mealScheduler.nearestUpcomingMeal(from: allMealEvents) {
             var widgetData = ScheduleWidgetData.load() ?? ScheduleWidgetData(
                 lastUpdated: Date(),
@@ -135,8 +153,9 @@ final class MealPlanningCoordinator {
             WidgetCenter.shared.reloadAllTimelines()
         }
 
-        return WeeklyPassResult(
+        return DailyPassResult(
             newEvents: newEvents,
+            eventsToDelete: staleFutureMeals,
             newMeal: newMeal,
             newMealEvent: newMealEvent
         )
@@ -151,8 +170,9 @@ final class MealPlanningCoordinator {
     }
 }
 
-struct WeeklyPassResult {
+struct DailyPassResult {
     var newEvents: [Event]
+    var eventsToDelete: [Event]
     var newMeal: Meal?
     var newMealEvent: Event?
 }

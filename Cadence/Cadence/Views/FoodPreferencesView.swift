@@ -14,6 +14,7 @@ struct FoodPreferencesView: View {
     @State private var dinnerStart = Date()
     @State private var dinnerEnd = Date()
     @State private var newMealSuggestionEnabled = true
+    @State private var mealGuidance = ""
     @State private var showingAddMeal = false
 
     private var prefs: UserPreferences? { prefsResults.first }
@@ -41,7 +42,7 @@ struct FoodPreferencesView: View {
         .navigationBarTitleDisplayMode(.large)
         .toolbarBackground(Color.cadenceCream, for: .navigationBar)
         .onAppear(perform: loadPrefs)
-        .onDisappear(perform: triggerWeeklyPass)
+        .onDisappear(perform: triggerDailyPass)
         .sheet(isPresented: $showingAddMeal) {
             AddMealView { name, prep in addMeal(name: name, prepTimeMinutes: prep) }
         }
@@ -131,6 +132,19 @@ struct FoodPreferencesView: View {
                 .onChange(of: newMealSuggestionEnabled) { savePrefs() }
 
             if newMealSuggestionEnabled {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Guidance")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.secondary)
+                    TextField("e.g. vegetarian, more chicken, rice dishes", text: $mealGuidance, axis: .vertical)
+                        .font(.subheadline)
+                        .onChange(of: mealGuidance) { savePrefs() }
+                    Text("Tell the AI what to look for — dietary restrictions, favourite ingredients, cuisines.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .padding(.vertical, 4)
+
                 HStack {
                     Text("Last suggestion")
                         .foregroundColor(.secondary)
@@ -199,6 +213,7 @@ struct FoodPreferencesView: View {
         guard let p = prefs else { return }
         breakfastEnabled = p.breakfastEnabled
         newMealSuggestionEnabled = p.newMealSuggestionEnabled
+        mealGuidance = p.mealGuidance
 
         let cal = Calendar.current
         var base = cal.dateComponents([.year, .month, .day], from: Date())
@@ -219,6 +234,7 @@ struct FoodPreferencesView: View {
 
         p.breakfastEnabled = breakfastEnabled
         p.newMealSuggestionEnabled = newMealSuggestionEnabled
+        p.mealGuidance = mealGuidance
         p.breakfastHour = cal.component(.hour, from: breakfastTime)
         p.breakfastMinute = cal.component(.minute, from: breakfastTime)
 
@@ -232,7 +248,7 @@ struct FoodPreferencesView: View {
         try? context.save()
     }
 
-    private func triggerWeeklyPass() {
+    private func triggerDailyPass() {
         guard let p = prefs else { return }
         let mealCategory = categories.first { $0.name == "Meal" }
         let coordinator = MealPlanningCoordinator(
@@ -243,11 +259,12 @@ struct FoodPreferencesView: View {
         let meals = allMeals
         let ctx = context
         Task { @MainActor in
-            let result = await coordinator.runWeeklyPass(
+            let result = await coordinator.runDailyPass(
                 existingEvents: events,
                 allMeals: meals,
                 preferences: p
             )
+            for event in result.eventsToDelete { ctx.delete(event) }
             for event in result.newEvents { ctx.insert(event) }
             if let meal = result.newMeal {
                 ctx.insert(meal)

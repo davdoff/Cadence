@@ -29,7 +29,7 @@ final class AIServiceTests: XCTestCase {
     // MARK: - Helpers
 
     func makeService(returning json: String) -> AIService {
-        var service = AIService(apiKey: "test-key")
+        var service = AIService()
         service._callAPI = { _ in json }
         return service
     }
@@ -55,7 +55,7 @@ final class AIServiceTests: XCTestCase {
 
     func testBuildsCorrectUserMessage() async throws {
         var captured = ""
-        var service = AIService(apiKey: "test-key")
+        var service = AIService()
         service._callAPI = { msg in
             captured = msg
             return self.addJSON()
@@ -184,7 +184,7 @@ final class AIServiceTests: XCTestCase {
 
     func testAnalyzeHabitsBuildsCorrectPayload() async throws {
         var captured = ""
-        var service = AIService(apiKey: "test-key")
+        var service = AIService()
         service._callAPI = { msg in captured = msg; return "Great week!" }
 
         let summary = HabitWeekSummary(name: "Gym", type: .good, weekTotal: 4, priorWeekTotal: 2)
@@ -197,7 +197,7 @@ final class AIServiceTests: XCTestCase {
 
     func testAnalyzeHabitsDownTrendIndicator() async throws {
         var captured = ""
-        var service = AIService(apiKey: "test-key")
+        var service = AIService()
         service._callAPI = { msg in captured = msg; return "Keep it up!" }
 
         let summary = HabitWeekSummary(name: "Smoking", type: .bad, weekTotal: 2, priorWeekTotal: 5)
@@ -207,13 +207,13 @@ final class AIServiceTests: XCTestCase {
     }
 
     func testAnalyzeHabitsEmptySummariesReturnsEmptyString() async throws {
-        let service = AIService(apiKey: "test-key")
+        let service = AIService()
         let result = try await service.analyzeHabits([])
         XCTAssertEqual(result, "")
     }
 
     func testAnalyzeHabitsReturnsRawTextFromAPI() async throws {
-        var service = AIService(apiKey: "test-key")
+        var service = AIService()
         let expected = "You're crushing it this week!"
         service._callAPI = { _ in expected }
 
@@ -235,7 +235,7 @@ final class AIServiceTests: XCTestCase {
           }
         }
         """
-        var service = AIService(apiKey: "test-key")
+        var service = AIService()
         service._callAPI = { _ in json }
         let prefs = makePrefs()
 
@@ -266,7 +266,7 @@ final class AIServiceTests: XCTestCase {
           }
         }
         """
-        var service = AIService(apiKey: "test-key")
+        var service = AIService()
         service._callAPI = { _ in json }
 
         let result = try await service.suggestNewMeal(
@@ -278,7 +278,7 @@ final class AIServiceTests: XCTestCase {
     }
 
     func testSuggestNewMealThrowsOnMalformedJSON() async {
-        var service = AIService(apiKey: "test-key")
+        var service = AIService()
         service._callAPI = { _ in "not json {{" }
 
         do {
@@ -306,7 +306,7 @@ final class AIServiceTests: XCTestCase {
           }
         }
         """
-        var service = AIService(apiKey: "test-key")
+        var service = AIService()
         service._callAPI = { _ in json }
 
         do {
@@ -326,7 +326,7 @@ final class AIServiceTests: XCTestCase {
 
     func testMoveEventBuildsMessageContainingAnchorAndReason() async throws {
         var captured = ""
-        var service = AIService(apiKey: "test-key")
+        var service = AIService()
         service._callAPI = { msg in captured = msg; return self.addJSON() }
 
         let prefs = makePrefs()
@@ -344,7 +344,7 @@ final class AIServiceTests: XCTestCase {
 
     func testRescheduleMissedBuildsMessageWithMissedCount() async throws {
         var captured = ""
-        var service = AIService(apiKey: "test-key")
+        var service = AIService()
         service._callAPI = { msg in captured = msg; return self.addJSON() }
 
         let prefs = makePrefs()

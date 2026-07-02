@@ -5,11 +5,13 @@ struct MealSchedulerService {
     // MARK: - Breakfast
 
     /// Returns new breakfast Events to persist for each day in targetDates that needs one.
-    /// Skips days that already have a breakfast event or a conflicting event within 30 minutes.
+    /// Skips days that already have a breakfast event, a conflicting event within 30 minutes,
+    /// or a breakfast time that has already passed.
     func scheduleBreakfastIfNeeded(
         existingEvents: [Event],
         preferences: UserPreferences,
-        targetDates: [Date]
+        targetDates: [Date],
+        now: Date = Date()
     ) -> [Event] {
         guard preferences.breakfastEnabled else { return [] }
         let calendar = Calendar.current
@@ -21,6 +23,8 @@ struct MealSchedulerService {
                 minute: preferences.breakfastMinute,
                 second: 0, of: date
             ) else { continue }
+
+            if start < now { continue }
 
             let alreadyScheduled = existingEvents.contains {
                 $0.title == "Breakfast" && calendar.isDate($0.startTime, inSameDayAs: date)
@@ -51,7 +55,8 @@ struct MealSchedulerService {
         existingEvents: [Event],
         meals: [Meal],
         preferences: UserPreferences,
-        targetDates: [Date]
+        targetDates: [Date],
+        now: Date = Date()
     ) -> [Event] {
         guard !meals.isEmpty else { return [] }
         let calendar = Calendar.current
@@ -60,7 +65,7 @@ struct MealSchedulerService {
 
         for date in targetDates {
             guard
-                let windowStart = calendar.date(
+                let rawWindowStart = calendar.date(
                     bySettingHour: preferences.dinnerWindowStartHour,
                     minute: preferences.dinnerWindowStartMinute,
                     second: 0, of: date),
@@ -73,10 +78,13 @@ struct MealSchedulerService {
             let dinnerExists = allEvents.contains {
                 $0.status != .missed &&
                 $0.source == .ai &&
-                $0.startTime >= windowStart &&
+                $0.startTime >= rawWindowStart &&
                 $0.startTime < windowEnd
             }
             if dinnerExists { continue }
+
+            let windowStart = Swift.max(rawWindowStart, now)
+            guard windowStart < windowEnd else { continue }
 
             let meal = meals.randomElement()!
             let durationMinutes = meal.prepTimeMinutes > 0 ? meal.prepTimeMinutes : 45
@@ -113,7 +121,8 @@ struct MealSchedulerService {
         existingEvents: [Event],
         scheduledDinnerEvents: [Event],
         preferences: UserPreferences,
-        minimumMinutes: Int = 45
+        minimumMinutes: Int = 45,
+        now: Date = Date()
     ) -> [TimeSlot] {
         let calendar = Calendar.current
         let allEvents = existingEvents + scheduledDinnerEvents
@@ -121,7 +130,7 @@ struct MealSchedulerService {
 
         for date in dates {
             guard
-                let windowStart = calendar.date(
+                let rawWindowStart = calendar.date(
                     bySettingHour: preferences.dinnerWindowStartHour,
                     minute: preferences.dinnerWindowStartMinute,
                     second: 0, of: date),
@@ -130,6 +139,9 @@ struct MealSchedulerService {
                     minute: preferences.dinnerWindowEndMinute,
                     second: 0, of: date)
             else { continue }
+
+            let windowStart = Swift.max(rawWindowStart, now)
+            guard windowStart < windowEnd else { continue }
 
             let dayEvents = allEvents.filter {
                 $0.status != .missed && calendar.isDate($0.startTime, inSameDayAs: date)

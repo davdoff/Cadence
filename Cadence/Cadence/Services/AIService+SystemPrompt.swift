@@ -41,6 +41,7 @@ extension AIService {
     - "tags" must be 1–3 short lowercase descriptors (e.g. "quick", "vegetarian", "one-pot").
     - "scheduledSlot" must use a DAY abbreviation from FREE_DINNER_SLOTS (e.g. "WED 20:00").
     - The chosen slot start time must leave room for prepTimeMinutes before the window ends.
+    - If a GUIDANCE line is present, the suggestion must follow it: dietary restrictions (e.g. "vegetarian", "no pork") are hard constraints; ingredient or cuisine hints (e.g. "chicken", "rice", "italian") should steer the choice.
     - Do not include any explanation, markdown, or extra keys.
     """
 

@@ -208,6 +208,26 @@ final class ContextBuilderTests: XCTestCase {
         XCTAssertTrue(output.contains("19:00"))
     }
 
+    func testMealSuggestionContainsGuidanceWhenSet() {
+        let prefs = makePrefs()
+        prefs.mealGuidance = "vegetarian, rice dishes"
+        let output = builder.build(
+            .mealSuggestion(existingMeals: [], freeDinnerSlots: []),
+            preferences: prefs
+        )
+        XCTAssertTrue(output.contains("GUIDANCE: \"vegetarian, rice dishes\""))
+    }
+
+    func testMealSuggestionOmitsGuidanceWhenEmpty() {
+        let prefs = makePrefs()
+        prefs.mealGuidance = "   "
+        let output = builder.build(
+            .mealSuggestion(existingMeals: [], freeDinnerSlots: []),
+            preferences: prefs
+        )
+        XCTAssertFalse(output.contains("GUIDANCE"))
+    }
+
     // MARK: - habitWeeklyAnalysis
 
     func testHabitAnalysisContainsHabitName() {

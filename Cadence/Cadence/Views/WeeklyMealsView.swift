@@ -49,7 +49,7 @@ struct WeeklyMealsView: View {
             }
         }
         .task {
-            await runWeeklyPass()
+            await runDailyPass()
         }
     }
 
@@ -72,6 +72,7 @@ struct WeeklyMealsView: View {
         let cal = Calendar.current
         let isPast = date < cal.startOfDay(for: Date())
         let isToday = cal.isDateInToday(date)
+        let isFuture = !isPast && !isToday
         let events = mealEvents(for: date)
         let breakfast = events.first { $0.title == "Breakfast" }
         let dinner = events.first { $0.title != "Breakfast" }
@@ -91,21 +92,21 @@ struct WeeklyMealsView: View {
 
             // Meal slots
             VStack(alignment: .leading, spacing: 10) {
-                breakfastSlot(event: breakfast, isPast: isPast)
-                dinnerSlot(event: dinner, isPast: isPast)
+                breakfastSlot(event: breakfast, isFuture: isFuture)
+                dinnerSlot(event: dinner, isFuture: isFuture)
             }
         }
         .padding(14)
         .background(Color.white)
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
-        .opacity(isPast ? 0.55 : 1)
+        .opacity(isPast ? 0.55 : (isFuture ? 0.75 : 1))
     }
 
     // MARK: - Slot rows
 
     @ViewBuilder
-    private func breakfastSlot(event: Event?, isPast: Bool) -> some View {
+    private func breakfastSlot(event: Event?, isFuture: Bool) -> some View {
         if let event {
             slotContent(
                 icon: "sunrise.fill",
@@ -113,13 +114,15 @@ struct WeeklyMealsView: View {
                 time: event.startTime,
                 isAIPick: false
             )
+        } else if isFuture {
+            emptySlot(icon: "sunrise.fill", label: "Planned on the day")
         } else {
             emptySlot(icon: "sunrise.fill", label: "Skipped")
         }
     }
 
     @ViewBuilder
-    private func dinnerSlot(event: Event?, isPast: Bool) -> some View {
+    private func dinnerSlot(event: Event?, isFuture: Bool) -> some View {
         if let event {
             NavigationLink {
                 EventDetailView(event: event)
@@ -132,6 +135,8 @@ struct WeeklyMealsView: View {
                 )
             }
             .buttonStyle(.plain)
+        } else if isFuture {
+            emptySlot(icon: "fork.knife", label: "Planned on the day")
         } else {
             emptySlot(icon: "fork.knife", label: "No slot")
         }
@@ -232,10 +237,10 @@ struct WeeklyMealsView: View {
         allMeals.contains { $0.name == event.title && !$0.isUserDefined }
     }
 
-    // MARK: - Weekly pass
+    // MARK: - Daily pass
 
     @MainActor
-    private func runWeeklyPass() async {
+    private func runDailyPass() async {
         guard let p = prefs else { return }
         isRunningPass = true
         defer { isRunningPass = false }
@@ -245,11 +250,14 @@ struct WeeklyMealsView: View {
             aiService: AIService(),
             mealCategory: mealCategory
         )
-        let result = await coordinator.runWeeklyPass(
+        let result = await coordinator.runDailyPass(
             existingEvents: allEvents,
             allMeals: allMeals,
             preferences: p
         )
+        for event in result.eventsToDelete {
+            context.delete(event)
+        }
         for event in result.newEvents {
             context.insert(event)
         }

@@ -77,6 +77,21 @@ struct OverviewView: View {
         return count
     }
 
+    // MARK: - Meal stats
+
+    private var mealEvents: [Event] {
+        periodEvents.filter { $0.category?.name == "Meal" }
+    }
+
+    private var mealsEaten:  Int { mealEvents.filter { $0.status == .completed }.count }
+    private var mealsMissed: Int { mealEvents.filter { $0.status == .missed    }.count }
+
+    private var breakfastRate: Double? {
+        let breakfasts = mealEvents.filter { $0.title == "Breakfast" && $0.status != .pending }
+        guard !breakfasts.isEmpty else { return nil }
+        return Double(breakfasts.filter { $0.status == .completed }.count) / Double(breakfasts.count)
+    }
+
     // MARK: - Habit highlights
 
     private var goodHabits: [Habit] { habits.filter { $0.type == .good } }
@@ -125,6 +140,9 @@ struct OverviewView: View {
                     }
                     if !categoryStats.isEmpty {
                         categoryCard
+                    }
+                    if !mealEvents.isEmpty {
+                        mealsCard
                     }
                     if !habits.isEmpty {
                         habitsCard
@@ -339,6 +357,54 @@ struct OverviewView: View {
                         }
                     }
                     .frame(height: 5)
+                }
+            }
+        }
+        .padding()
+        .background(Color.white)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.04), radius: 6, y: 2)
+    }
+
+    // MARK: - Meals card
+
+    private var mealsCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label("Meals", systemImage: "fork.knife")
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(.cadenceOrange)
+
+            HStack(alignment: .top, spacing: 0) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("\(mealsEaten)")
+                        .font(.system(size: 36, weight: .bold, design: .rounded))
+                        .foregroundColor(.cadenceOrange)
+                    Text("meal\(mealsEaten == 1 ? "" : "s") eaten")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                VStack(alignment: .center, spacing: 4) {
+                    Text("\(mealsMissed)")
+                        .font(.system(size: 36, weight: .bold, design: .rounded))
+                        .foregroundColor(mealsMissed > 0 ? .red.opacity(0.7) : .secondary)
+                    Text("missed")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
+
+                if let rate = breakfastRate {
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text("\(Int(rate * 100))%")
+                            .font(.system(size: 36, weight: .bold, design: .rounded))
+                            .foregroundColor(rate >= 0.7 ? .green : .cadenceOrange)
+                        Text("breakfasts")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .trailing)
                 }
             }
         }

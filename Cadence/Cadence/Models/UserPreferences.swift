@@ -29,6 +29,9 @@ final class UserPreferences {
     var knownMealIDs: [UUID]
     var newMealSuggestionEnabled: Bool
     var lastNewMealSuggestedDate: Date?
+    // Free-text guidance for AI meal suggestions (e.g. "vegetarian, more rice dishes").
+    // Declaration default (not just init) so existing on-device stores migrate.
+    var mealGuidance: String = ""
 
     // AI behaviour: 1 = passive suggestions, 5 = aggressive scheduling
     var aiAggressiveness: Int
@@ -65,6 +68,7 @@ final class UserPreferences {
         knownMealIDs = []
         newMealSuggestionEnabled = true
         lastNewMealSuggestedDate = nil
+        mealGuidance = ""
     }
 
     func perCategoryNotifications() -> [UUID: Bool] {

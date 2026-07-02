@@ -72,12 +72,14 @@ struct SchedulingContextBuilder {
         let slotsLine = slots.map { slotLabel($0) }.joined(separator: ", ")
         let winStart = String(format: "%02d:%02d", preferences.dinnerWindowStartHour, preferences.dinnerWindowStartMinute)
         let winEnd   = String(format: "%02d:%02d", preferences.dinnerWindowEndHour,   preferences.dinnerWindowEndMinute)
+        let guidance = preferences.mealGuidance.trimmingCharacters(in: .whitespacesAndNewlines)
+        let guidanceLine = guidance.isEmpty ? "" : "\nGUIDANCE: \"\(guidance)\""
         return """
         INTENT: new_meal_suggestion
         EXISTING_MEALS: \(mealsLine)
         FREE_DINNER_SLOTS: \(slotsLine)
         PREFS: dinnerWindow=\(winStart)-\(winEnd)
-        """
+        """ + guidanceLine
     }
 
     private func buildAddToFreeSlot(

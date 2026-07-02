@@ -60,6 +60,10 @@ final class MealSchedulerServiceTests: XCTestCase {
         return (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: today) }
     }
 
+    /// Fixed "now" at the start of today so tests targeting today's date are
+    /// independent of the wall-clock time they run at.
+    var startOfToday: Date { Calendar.current.startOfDay(for: Date()) }
+
     // MARK: - Breakfast: basic scheduling
 
     func testBreakfastScheduledOnFreeDay() {
@@ -133,7 +137,8 @@ final class MealSchedulerServiceTests: XCTestCase {
         let result = service.scheduleBreakfastIfNeeded(
             existingEvents: [conflict],
             preferences: prefs,
-            targetDates: [targetDate]
+            targetDates: [targetDate],
+            now: startOfToday
         )
         XCTAssertEqual(result.count, 1, "Breakfast should be scheduled when conflict is >30 min away")
     }
@@ -168,7 +173,8 @@ final class MealSchedulerServiceTests: XCTestCase {
         let result = service.scheduleBreakfastIfNeeded(
             existingEvents: [missed],
             preferences: prefs,
-            targetDates: [targetDate]
+            targetDates: [targetDate],
+            now: startOfToday
         )
         XCTAssertEqual(result.count, 1, "Missed events should not block breakfast scheduling")
     }
@@ -180,7 +186,7 @@ final class MealSchedulerServiceTests: XCTestCase {
         prefs.breakfastDuration = 60 // set to 60 — should be capped at 30
 
         let targetDate = Calendar.current.startOfDay(for: Date())
-        let result = service.scheduleBreakfastIfNeeded(existingEvents: [], preferences: prefs, targetDates: [targetDate])
+        let result = service.scheduleBreakfastIfNeeded(existingEvents: [], preferences: prefs, targetDates: [targetDate], now: startOfToday)
 
         let event = try XCTUnwrap(result.first, "Expected a breakfast event to be created")
         XCTAssertEqual(event.endTime.timeIntervalSince(event.startTime), 30 * 60, accuracy: 1)
@@ -202,7 +208,8 @@ final class MealSchedulerServiceTests: XCTestCase {
             existingEvents: [],
             meals: [meal],
             preferences: prefs,
-            targetDates: dates
+            targetDates: dates,
+            now: startOfToday
         )
 
         XCTAssertEqual(result.count, 1)
@@ -268,7 +275,8 @@ final class MealSchedulerServiceTests: XCTestCase {
             existingEvents: [],
             meals: [meal],
             preferences: prefs,
-            targetDates: dates
+            targetDates: dates,
+            now: startOfToday
         )
 
         // One event per day — no two events on the same day
@@ -289,6 +297,103 @@ final class MealSchedulerServiceTests: XCTestCase {
             targetDates: next7Days()
         )
         XCTAssertTrue(result.isEmpty)
+    }
+
+    // MARK: - Day-start scheduling: past times are never scheduled
+
+    func testBreakfastSkippedWhenTimeAlreadyPassed() {
+        let prefs = makePrefs()
+        prefs.breakfastEnabled = true
+        prefs.breakfastHour = 8
+        prefs.breakfastMinute = 0
+
+        let targetDate = Calendar.current.startOfDay(for: Date())
+        let result = service.scheduleBreakfastIfNeeded(
+            existingEvents: [],
+            preferences: prefs,
+            targetDates: [targetDate],
+            now: at(9) // pass runs at 09:00 — breakfast time has passed
+        )
+        XCTAssertTrue(result.isEmpty, "Breakfast should not be scheduled in the past")
+    }
+
+    func testDinnerWindowClampedToNow() {
+        let prefs = makePrefs()
+        prefs.dinnerWindowStartHour = 19
+        prefs.dinnerWindowEndHour = 22
+        prefs.bufferMinutes = 0
+
+        let meal = makeMeal(prep: 30)
+        let dates = [Calendar.current.startOfDay(for: Date())]
+
+        let result = service.scheduleDinnerSlots(
+            existingEvents: [],
+            meals: [meal],
+            preferences: prefs,
+            targetDates: dates,
+            now: at(20, 30) // pass runs mid-window
+        )
+        XCTAssertEqual(result.count, 1)
+        XCTAssertGreaterThanOrEqual(result[0].startTime, at(20, 30), "Dinner must not start in the past")
+    }
+
+    func testDinnerSkippedWhenWindowFullyPast() {
+        let prefs = makePrefs()
+        prefs.dinnerWindowStartHour = 19
+        prefs.dinnerWindowEndHour = 22
+
+        let meal = makeMeal(prep: 30)
+        let dates = [Calendar.current.startOfDay(for: Date())]
+
+        let result = service.scheduleDinnerSlots(
+            existingEvents: [],
+            meals: [meal],
+            preferences: prefs,
+            targetDates: dates,
+            now: at(23) // pass runs after the window closed
+        )
+        XCTAssertTrue(result.isEmpty, "No dinner should be scheduled after the window has passed")
+    }
+
+    func testDinnerNotDuplicatedWhenEarlierDinnerExistsToday() {
+        let prefs = makePrefs()
+        prefs.dinnerWindowStartHour = 19
+        prefs.dinnerWindowEndHour = 22
+        prefs.bufferMinutes = 0
+
+        // A dinner was already scheduled at 19:15; the pass re-runs at 20:30.
+        let existing = makeEvent(title: "Pasta", start: at(19, 15), end: at(20), source: .ai)
+        let meal = makeMeal()
+        let dates = [Calendar.current.startOfDay(for: Date())]
+
+        let result = service.scheduleDinnerSlots(
+            existingEvents: [existing],
+            meals: [meal],
+            preferences: prefs,
+            targetDates: dates,
+            now: at(20, 30)
+        )
+        XCTAssertTrue(result.isEmpty, "An earlier dinner today should block a second one")
+    }
+
+    func testRemainingDinnerSlotsClampedToNow() {
+        let prefs = makePrefs()
+        prefs.dinnerWindowStartHour = 19
+        prefs.dinnerWindowEndHour = 22
+        prefs.bufferMinutes = 0
+
+        let dates = [Calendar.current.startOfDay(for: Date())]
+        let slots = service.remainingDinnerSlots(
+            for: dates,
+            existingEvents: [],
+            scheduledDinnerEvents: [],
+            preferences: prefs,
+            minimumMinutes: 30,
+            now: at(21) // only 21:00–22:00 remains
+        )
+        XCTAssertEqual(slots.count, 1)
+        XCTAssertEqual(slots[0].start, at(21))
+        XCTAssertEqual(slots[0].duration, 3600, accuracy: 1)
     }
 
     // MARK: - Breakfast missed-3-days streak detection
@@ -349,7 +454,8 @@ final class MealSchedulerServiceTests: XCTestCase {
             existingEvents: [],
             scheduledDinnerEvents: [],
             preferences: prefs,
-            minimumMinutes: 30
+            minimumMinutes: 30,
+            now: startOfToday
         )
 
         XCTAssertEqual(slots.count, 1)
@@ -390,7 +496,8 @@ final class MealSchedulerServiceTests: XCTestCase {
             existingEvents: [],
             scheduledDinnerEvents: [scheduled],
             preferences: prefs,
-            minimumMinutes: 30 // 20:30–22:00 = 90 min → should find a slot
+            minimumMinutes: 30, // 20:30–22:00 = 90 min → should find a slot
+            now: startOfToday
         )
         XCTAssertFalse(slots.isEmpty)
     }
@@ -409,7 +516,8 @@ final class MealSchedulerServiceTests: XCTestCase {
             existingEvents: [missed],
             scheduledDinnerEvents: [],
             preferences: prefs,
-            minimumMinutes: 30
+            minimumMinutes: 30,
+            now: startOfToday
         )
         // Missed events don't block the window
         XCTAssertFalse(slots.isEmpty)
