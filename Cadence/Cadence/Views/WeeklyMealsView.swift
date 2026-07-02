@@ -10,6 +10,11 @@ struct WeeklyMealsView: View {
     @AppStorage("accentColorHex") private var accentColorHex = "#E8784D"
 
     @State private var isRunningPass = false
+    @State private var isFetchingSuggestions = false
+    @State private var suggestionOptions: [AIService.MealSuggestionResult] = []
+    @State private var showingSuggestionSheet = false
+    @State private var alertMessage = ""
+    @State private var showingAlert = false
 
     private var prefs: UserPreferences? { prefsResults.first }
 
@@ -49,7 +54,15 @@ struct WeeklyMealsView: View {
             }
         }
         .task {
-            await runDailyPass()
+            runDailyPass()
+        }
+        .sheet(isPresented: $showingSuggestionSheet) {
+            suggestionSheet
+        }
+        .alert("Meals", isPresented: $showingAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(alertMessage)
         }
     }
 
@@ -57,6 +70,12 @@ struct WeeklyMealsView: View {
 
     private var weekList: some View {
         List {
+            if prefs?.newMealSuggestionEnabled == true {
+                discoverCard
+                    .listRowBackground(Color.cadenceCream)
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+            }
             ForEach(weekDates, id: \.self) { date in
                 dayCard(for: date)
                     .listRowBackground(Color.cadenceCream)
@@ -103,6 +122,126 @@ struct WeeklyMealsView: View {
         .opacity(isPast ? 0.55 : (isFuture ? 0.75 : 1))
     }
 
+    // MARK: - Discover card
+
+    private var isDiscoveryDue: Bool {
+        guard let last = prefs?.lastNewMealSuggestedDate else { return true }
+        return (Calendar.current.dateComponents([.day], from: last, to: Date()).day ?? 0) >= 7
+    }
+
+    private var canFetchToday: Bool { prefs?.canFetchMealSuggestion() ?? false }
+
+    private var discoverCard: some View {
+        Button {
+            Task { await fetchSuggestions() }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "sparkles")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(canFetchToday ? Color(hex: accentColorHex) : .secondary)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Discover a new meal")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(canFetchToday ? .primary : .secondary)
+                    Text(canFetchToday
+                         ? (isDiscoveryDue ? "It's been a while — get 3 fresh ideas for tonight" : "Get 3 ideas for tonight's dinner")
+                         : "2 suggestions used today — back tomorrow")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                Spacer()
+
+                if isFetchingSuggestions {
+                    ProgressView()
+                } else if canFetchToday {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding(14)
+            .background(Color.white)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .overlay {
+                if isDiscoveryDue && canFetchToday {
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(Color(hex: accentColorHex).opacity(0.5), lineWidth: 1)
+                }
+            }
+            .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
+        }
+        .buttonStyle(.plain)
+        .disabled(!canFetchToday || isFetchingSuggestions)
+    }
+
+    // MARK: - Suggestion sheet
+
+    private var suggestionSheet: some View {
+        NavigationStack {
+            ZStack {
+                Color.cadenceCream.ignoresSafeArea()
+                ScrollView {
+                    VStack(spacing: 12) {
+                        Text("Tap one to add it to tonight's schedule")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        ForEach(suggestionOptions, id: \.meal.id) { option in
+                            suggestionCard(option)
+                        }
+                    }
+                    .padding(16)
+                }
+            }
+            .navigationTitle("Tonight's Ideas")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { showingSuggestionSheet = false }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func suggestionCard(_ option: AIService.MealSuggestionResult) -> some View {
+        Button {
+            acceptSuggestion(option)
+        } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text(option.meal.name)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(.primary)
+                    Spacer()
+                    Text("\(option.meal.prepTimeMinutes) min")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                HStack(spacing: 6) {
+                    Text(option.scheduledStart, format: .dateTime.hour().minute())
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    ForEach(option.meal.tags, id: \.self) { tag in
+                        Text(tag)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(Color(hex: accentColorHex))
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Color(hex: accentColorHex).opacity(0.12))
+                            .clipShape(Capsule())
+                    }
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.white)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
+        }
+        .buttonStyle(.plain)
+    }
+
     // MARK: - Slot rows
 
     @ViewBuilder
@@ -124,17 +263,32 @@ struct WeeklyMealsView: View {
     @ViewBuilder
     private func dinnerSlot(event: Event?, isFuture: Bool) -> some View {
         if let event {
-            NavigationLink {
-                EventDetailView(event: event)
-            } label: {
-                slotContent(
-                    icon: "fork.knife",
-                    title: event.title,
-                    time: event.startTime,
-                    isAIPick: isAIPick(event: event)
-                )
+            HStack(spacing: 8) {
+                NavigationLink {
+                    EventDetailView(event: event)
+                } label: {
+                    slotContent(
+                        icon: "fork.knife",
+                        title: event.title,
+                        time: event.startTime,
+                        isAIPick: isAIPick(event: event)
+                    )
+                }
+                .buttonStyle(.plain)
+
+                if canSwap(event) {
+                    Spacer()
+                    Button {
+                        swapMeal(event)
+                    } label: {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(Color(hex: accentColorHex))
+                            .padding(6)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
-            .buttonStyle(.plain)
         } else if isFuture {
             emptySlot(icon: "fork.knife", label: "Planned on the day")
         } else {
@@ -237,20 +391,105 @@ struct WeeklyMealsView: View {
         allMeals.contains { $0.name == event.title && !$0.isUserDefined }
     }
 
-    // MARK: - Daily pass
+    private func canSwap(_ event: Event) -> Bool {
+        Calendar.current.isDateInToday(event.startTime) && event.status == .pending
+    }
+
+    // MARK: - Suggestions
 
     @MainActor
-    private func runDailyPass() async {
+    private func fetchSuggestions() async {
+        guard let p = prefs, p.canFetchMealSuggestion() else { return }
+
+        let today = Calendar.current.startOfDay(for: Date())
+        let slots = MealSchedulerService().remainingDinnerSlots(
+            for: [today],
+            existingEvents: allEvents,
+            scheduledDinnerEvents: [],
+            preferences: p
+        )
+        guard !slots.isEmpty else {
+            alertMessage = "No free dinner slot left today — try again tomorrow."
+            showingAlert = true
+            return
+        }
+
+        isFetchingSuggestions = true
+        defer { isFetchingSuggestions = false }
+        p.recordMealSuggestionFetch()
+        try? context.save()
+
+        do {
+            suggestionOptions = try await AIService().suggestMealOptions(
+                existingMeals: allMeals,
+                freeDinnerSlots: slots,
+                preferences: p,
+                referenceWeek: [today]
+            )
+            showingSuggestionSheet = true
+        } catch {
+            alertMessage = error.localizedDescription
+            showingAlert = true
+        }
+    }
+
+    private func acceptSuggestion(_ option: AIService.MealSuggestionResult) {
+        guard let p = prefs else { return }
+        context.insert(option.meal)
+        p.knownMealIDs.append(option.meal.id)
+
+        let event = Event(
+            title: option.meal.name,
+            startTime: option.scheduledStart,
+            endTime: option.scheduledEnd,
+            category: categories.first { $0.name == "Meal" },
+            source: .ai
+        )
+        event.notificationIdentifier = NotificationService()
+            .scheduleMealNotification(for: event, reminderMinutes: p.defaultReminderMinutes)
+        context.insert(event)
+        p.lastNewMealSuggestedDate = Date()
+        try? context.save()
+        showingSuggestionSheet = false
+    }
+
+    // MARK: - Swap
+
+    private func swapMeal(_ event: Event) {
+        guard let p = prefs else { return }
+        let known = Set(p.knownMealIDs)
+        let cookable = allMeals.filter { known.contains($0.id) }
+
+        guard let swap = MealSchedulerService().swapDinner(
+            for: event,
+            meals: cookable,
+            existingEvents: allEvents,
+            preferences: p
+        ) else {
+            alertMessage = "No other meal fits tonight's slot."
+            showingAlert = true
+            return
+        }
+
+        let notifications = NotificationService()
+        notifications.cancelEventNotifications(for: event)
+        event.title = swap.meal.name
+        event.endTime = swap.endTime
+        event.notificationIdentifier = notifications
+            .scheduleMealNotification(for: event, reminderMinutes: p.defaultReminderMinutes)
+        try? context.save()
+    }
+
+    // MARK: - Daily pass
+
+    private func runDailyPass() {
         guard let p = prefs else { return }
         isRunningPass = true
         defer { isRunningPass = false }
 
         let mealCategory = categories.first { $0.name == "Meal" }
-        let coordinator = MealPlanningCoordinator(
-            aiService: AIService(),
-            mealCategory: mealCategory
-        )
-        let result = await coordinator.runDailyPass(
+        let coordinator = MealPlanningCoordinator(mealCategory: mealCategory)
+        let result = coordinator.runDailyPass(
             existingEvents: allEvents,
             allMeals: allMeals,
             preferences: p
@@ -260,10 +499,6 @@ struct WeeklyMealsView: View {
         }
         for event in result.newEvents {
             context.insert(event)
-        }
-        if let meal = result.newMeal {
-            context.insert(meal)
-            p.knownMealIDs.append(meal.id)
         }
         try? context.save()
     }

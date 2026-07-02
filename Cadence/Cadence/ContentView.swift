@@ -52,21 +52,14 @@ struct ContentView: View {
         guard let p = prefsResults.first else { return }
 
         let mealCategory = categories.first { $0.name == "Meal" }
-        let coordinator = MealPlanningCoordinator(
-            aiService: AIService(),
-            mealCategory: mealCategory
-        )
-        let result = await coordinator.runDailyPass(
+        let coordinator = MealPlanningCoordinator(mealCategory: mealCategory)
+        let result = coordinator.runDailyPass(
             existingEvents: allEvents,
             allMeals: allMeals,
             preferences: p
         )
         for event in result.eventsToDelete { context.delete(event) }
         for event in result.newEvents { context.insert(event) }
-        if let meal = result.newMeal {
-            context.insert(meal)
-            p.knownMealIDs.append(meal.id)
-        }
         try? context.save()
         lastMealPassDay = todayKey
     }

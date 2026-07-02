@@ -27,7 +27,7 @@ A native iOS scheduling and productivity app for a first-time solo release. The 
 Each event supports:
 - Delete single occurrence
 - Delete all occurrences (recurring events)
-- Edit duration, start time, end time (drag gesture or manual input)
+- Edit title, date, time, duration, and category from the event detail view (implemented — reuses the Add Event form in edit mode; `id`/`source`/`status` are never changed, and time changes cancel and reschedule the notification)
 - Mark as **Completed** or **Missed**
 - Assign to a **Category**
 
@@ -55,8 +55,9 @@ The meal planning system has two distinct scheduling tracks — breakfast and di
 Breakfast is a daily recurring event created automatically at a user-defined time. It requires no API call and no interaction once configured.
 
 **Behaviour:**
-- Created as a recurring `Event` (`source: .ai`, category = Meal, `recurrenceRule = .daily`)
+- Created day-by-day during the daily meal pass (`source: .ai`, category = Meal) — each day gets its own event, no recurrence rule
 - Default time: configurable by user (e.g. 08:00), duration capped at 30 minutes
+- Breakfast times already in the past are skipped (day-start planning)
 - If a conflicting event already starts within 30 minutes of the breakfast slot on a given day, that day is silently skipped — no conflict is created
 - The user marks each instance `.completed` or `.missed` like any other event
 - If breakfast is missed 3 days in a row, a local notification fires at breakfast time on day 4: *"You've missed breakfast 3 days in a row. Want to adjust the time?"* — no API call, purely threshold-triggered
@@ -67,18 +68,18 @@ Breakfast is a daily recurring event created automatically at a user-defined tim
 
 ---
 
-### 6.2 Dinner — Random Slot, Random Meal, Local Logic
+### 6.2 Dinner — Slot-First, Fit-Aware, Local Logic
 
-Dinner scheduling is fully local. The randomness is intentional — the user explicitly wants variety without manual planning.
+Dinner scheduling is fully local. Randomness within the constraints is intentional — variety without manual planning.
 
 **Behaviour:**
 - Window: 19:00–22:00 every day, including weekends (configurable: `dinnerWindowStart`, `dinnerWindowEnd`)
 - Duration per dinner = meal's `prepTimeMinutes` (default 45 min if unset)
-- `MealSchedulerService` calls the existing free slot finder, filtered to the dinner window, then picks a slot at random from valid candidates
-- Meal is also selected randomly from the user's `knownMeals` list
+- **Slot-first selection**: `MealSchedulerService` finds the free slots inside the dinner window, picks one at random, then picks a random meal **that fits the slot's length** — busy evenings automatically get quick meals
+- **No repeats within 7 days**: meals cooked or scheduled in the previous 7 days are excluded from the pick (falls back to the full list when the catalog is too small to avoid repeats)
 - If no free slot exists within the window on a given day, that day is skipped silently — no forced conflict
-- Scheduled 7 days at a time: runs on app launch and whenever the schedule changes materially
-- Existing dinner events are not overwritten mid-week — reschedule only applies to days not yet scheduled
+- **Planned at day start for today only** — the daily pass runs on app launch (once per calendar day), when Food Preferences closes, and when the Meals screen opens; future days are never pre-booked, and leftover pending AI meal events on future days are cleaned up
+- **Swap tonight's dinner**: today's pending dinner can be re-rolled from the Meals screen (circular-arrows button). The replacement must fit before the next event (minus buffer) or the window end, applies the same no-repeat filter, and the event's notification is cancelled and rescheduled
 
 **What the user maintains:**
 - A list of meals they can cook (`Meal` records with name and prep time)
@@ -86,44 +87,50 @@ Dinner scheduling is fully local. The randomness is intentional — the user exp
 
 ---
 
-### 6.3 New Meal Suggestion — Single Weekly API Call
+### 6.3 New Meal Suggestions — User-Triggered, Choice-Based
 
-Once per week the app calls the Claude API to suggest one new meal to try. This is the only AI call in the entire meal planning system.
+The user asks for new meal ideas from the Meals screen ("✨ Discover a new meal" card). One API call returns **three options**; nothing is scheduled until the user picks one. This is the only AI call in the entire meal planning system — the daily pass never calls the API on its own.
 
-**Trigger conditions (all must be true):**
-- `newMealSuggestionEnabled == true` in preferences
-- At least 7 days have elapsed since `lastNewMealSuggestedDate`
-- Triggered automatically during the weekly dinner scheduling pass — not user-initiated
+**Trigger conditions:**
+- `newMealSuggestionEnabled == true` in preferences (card is hidden otherwise)
+- User-initiated tap on the discover card — never automatic
+- **Capped at 2 fetches per calendar day** (`mealSuggestionFetchCount` / `mealSuggestionFetchDate`, helpers `canFetchMealSuggestion` / `recordMealSuggestionFetch` on `UserPreferences`); the card shows a disabled state once the cap is hit
+- Requires at least one free dinner slot left today (via `remainingDinnerSlots`); otherwise an alert is shown and no call is made
+- The card is highlighted with an accent outline when no suggestion has been accepted for 7+ days (`lastNewMealSuggestedDate`) — the weekly-discovery nudge
 
 **What gets sent (token-efficient):**
 
 ```
 INTENT: new_meal_suggestion
 EXISTING_MEALS: Pasta Bolognese(45min), Stir Fry(30min), Omelette(15min)
-FREE_DINNER_SLOTS: MON 19:30-21:00, WED 20:00-21:30, FRI 19:00-20:30, SAT 19:00-22:00
+FREE_DINNER_SLOTS: WED 19:00-20:30, WED 20:45-22:00
 PREFS: dinnerWindow=19:00-22:00
+GUIDANCE: "vegetarian, more rice dishes"
 ```
 
-Nothing else is sent — no full event objects, no habit data, no other schedule context.
+The `GUIDANCE` line comes from the free-text `mealGuidance` preference (Food Preferences → Meal Discovery) and is omitted when empty. Dietary restrictions in it are hard constraints for the AI; ingredient/cuisine hints steer the choice. Nothing else is sent — no full event objects, no habit data, no other schedule context.
 
 **Expected JSON response (strict schema):**
 
 ```json
 {
-  "meal": {
-    "name": "Thai Green Curry",
-    "prepTimeMinutes": 40,
-    "tags": ["spicy", "one-pot"],
-    "scheduledSlot": "WED 20:00"
-  }
+  "meals": [
+    { "name": "Thai Green Curry", "prepTimeMinutes": 40, "tags": ["spicy", "one-pot"], "scheduledSlot": "WED 20:00" },
+    { "name": "Shakshuka", "prepTimeMinutes": 25, "tags": ["vegetarian"], "scheduledSlot": "WED 19:30" },
+    { "name": "Beef Tacos", "prepTimeMinutes": 30, "tags": ["quick"], "scheduledSlot": "WED 20:30" }
+  ]
 }
 ```
 
-**After a successful response:**
+Options with an unparseable `scheduledSlot` are dropped client-side; if none parse, the call fails with an alert.
+
+**When the user accepts an option (tap in the suggestion sheet):**
 1. A new `Meal` record is created (`isUserDefined: false`, `tags` populated from response)
-2. An `Event` is created for the returned `scheduledSlot`
-3. `lastNewMealSuggestedDate` is updated to today
-4. The meal does **not** join the permanent rotation until the user cooks it at least once (marks the event `.completed`). If missed, it remains available for future suggestions but is deprioritised in random picks.
+2. An `Event` is created for the returned `scheduledSlot` with a meal notification
+3. The meal **joins the rotation immediately** (`knownMealIDs`) — explicit acceptance replaces the old cook-it-first rule
+4. `lastNewMealSuggestedDate` is updated to today
+
+Dismissing the sheet inserts nothing (the fetch still counts against the daily cap).
 
 ---
 
@@ -145,14 +152,17 @@ New fields added to existing models (no existing fields changed):
 
 ```swift
 // UserPreferences additions
-- breakfastEnabled: Bool                 // default true
-- breakfastTime: DateComponents          // e.g. 08:00
-- breakfastDuration: Int                 // minutes, max 30
-- dinnerWindowStart: DateComponents      // default 19:00
-- dinnerWindowEnd: DateComponents        // default 22:00
-- knownMealIDs: [UUID]                   // references into Meal store
+- breakfastEnabled: Bool                        // default true
+- breakfastHour / breakfastMinute: Int          // e.g. 08:00
+- breakfastDuration: Int                        // minutes, max 30
+- dinnerWindowStartHour / StartMinute: Int      // default 19:00
+- dinnerWindowEndHour / EndMinute: Int          // default 22:00
+- knownMealIDs: [UUID]                          // references into Meal store
 - newMealSuggestionEnabled: Bool
 - lastNewMealSuggestedDate: Date?
+- mealGuidance: String                          // free text sent as the GUIDANCE line
+- mealSuggestionFetchCount: Int                 // daily AI fetch cap (max 2/day)
+- mealSuggestionFetchDate: Date?                // day the count applies to
 
 // Meal additions
 - isUserDefined: Bool    // false = AI-suggested
@@ -181,34 +191,37 @@ After any meal scheduling pass, write the nearest upcoming meal event to `Schedu
 
 ---
 
-### 6.8 MealSchedulerService (Local — No API)
+### 6.8 MealSchedulerService + MealPlanningCoordinator (Local — No API)
 
-A dedicated service handles all local meal scheduling. It does not touch the AI service.
+`MealSchedulerService` is a pure struct: it takes existing data in, returns objects to persist, and never touches the SwiftData context or the AI service. Time-dependent methods take `now: Date = Date()` so tests can pin the clock.
 
 ```swift
-class MealSchedulerService {
+struct MealSchedulerService {
 
-    // Creates recurring breakfast events for the next 7 days.
-    // Skips days where a conflicting event exists within 30 min of breakfastTime.
-    func scheduleBreakfastIfNeeded(
-        existingEvents: [Event],
-        preferences: UserPreferences,
-        targetDates: [Date]
-    ) -> [Event]
+    // Breakfast events for targetDates. Skips days with a conflict within 30 min
+    // of breakfast time and times already in the past.
+    func scheduleBreakfastIfNeeded(existingEvents:preferences:targetDates:now:) -> [Event]
 
-    // Finds random free dinner slots and assigns random meals.
-    // Skips days with no valid slot. Does not overwrite already-scheduled dinners.
-    func scheduleDinnerSlots(
-        existingEvents: [Event],
-        meals: [Meal],
-        preferences: UserPreferences,
-        targetDates: [Date]
-    ) -> [Event]
+    // Slot-first dinner scheduling: random free slot, then a random meal that fits it.
+    // Excludes meals cooked/scheduled in the previous 7 days (with small-catalog fallback).
+    func scheduleDinnerSlots(existingEvents:meals:preferences:targetDates:now:) -> [Event]
 
-    // Returns true if the weekly AI suggestion call should fire.
-    func shouldRequestNewMealSuggestion(preferences: UserPreferences) -> Bool
+    // Unclaimed dinner-window slots — used to gate and place AI suggestions.
+    func remainingDinnerSlots(for:existingEvents:scheduledDinnerEvents:preferences:minimumMinutes:now:) -> [TimeSlot]
+
+    // Replacement meal + end time for a dinner event, fitting between the event's
+    // start and the next event (minus buffer) or window end. Nil if nothing fits.
+    func swapDinner(for:meals:existingEvents:preferences:) -> (meal: Meal, endTime: Date)?
+
+    // Consecutive missed breakfasts (drives the 3-day nudge).
+    func breakfastMissedStreakCount(events:) -> Int
+
+    // Nearest upcoming meal event (widget helper).
+    func nearestUpcomingMeal(from:) -> Event?
 }
 ```
+
+`MealPlanningCoordinator` (`@MainActor`) orchestrates the daily pass: stale future-meal cleanup → breakfast → dinner → notification wiring → widget update. It returns a `DailyPassResult` (`newEvents`, `eventsToDelete`) for the caller to persist. AI suggestions are **not** part of the pass — they're user-triggered from the Meals screen. The daily fetch-cap helpers (`canFetchMealSuggestion(now:)` / `recordMealSuggestionFetch(now:)`) live on `UserPreferences`.
 
 ---
 
@@ -292,6 +305,21 @@ After v1, add an optional **multi-turn intake flow** where Claude asks the user 
 
 Different scheduling intents require structurally different context sent to Claude. The app uses a `SchedulingContextBuilder` service that selects the right data shape per intent before making any API call.
 
+### Proxy Server (Implemented)
+
+The app **never calls the Claude API directly**. All calls go through a local Node/Express proxy (`server.js`, gitignored) that holds the API key. `AIService.proxyBaseURL` points at the proxy — during development it's an ngrok URL that must be updated whenever ngrok restarts. The app POSTs `{ systemPrompt, userPayload }` and the proxy returns the raw Claude response envelope.
+
+| Route | Purpose | System prompt |
+|---|---|---|
+| `POST /api/schedule/add` | Add event from natural language | `systemPrompt` |
+| `POST /api/schedule/move` | Move an existing event | `systemPrompt` |
+| `POST /api/schedule/reschedule` | Reschedule a missed event | `systemPrompt` |
+| `POST /api/meal/suggestion` | 3 new-meal options | `mealSuggestionSystemPrompt` |
+| `POST /api/habit/analysis` | Weekly habit insight (plain text) | `habitSystemPrompt` |
+| `POST /api/project/plan` | Deep project phase breakdown | `projectPlanSystemPrompt` |
+
+`AIService` has a `_callAPI` closure hook that tests use to stub responses without hitting the proxy.
+
 ### Intent Types and Their Context Shape
 
 **Intent: Add to free slot**
@@ -342,11 +370,12 @@ CONSTRAINTS: "Weekends only, no Swift experience needed for UI layer"
 
 ```swift
 enum SchedulingIntent {
-    case addToFreeSlot(description: String)
-    case moveEvent(event: Event, reason: String)
-    case rescheduleMissed(event: Event)
+    case mealSuggestion(existingMeals: [Meal], freeDinnerSlots: [TimeSlot])
+    case addToFreeSlot(description: String, freeSlots: [TimeSlot])
+    case moveEvent(event: Event, reason: String, surroundingEvents: [Event], freeSlots: [TimeSlot])
+    case rescheduleMissed(event: Event, missedCount: Int, freeSlots: [TimeSlot])
     case habitWeeklyAnalysis(habits: [HabitWeekSummary])
-    case deepProjectPlan(form: ProjectPlanForm)
+    case deepProjectPlan(goal: String, deadline: Date, weeklyHours: Int, constraints: String)
 }
 ```
 
@@ -559,20 +588,25 @@ Habit
 - countLog: [Date: Int] // date → count for that day
 
 UserPreferences
-- workingHours: ClosedRange<Date>
+- workStartHour / workEndHour: Int
 - bufferMinutes: Int
-- priorityCategories: [Category]
+- priorityCategoryIDs: [UUID]
 - avoidScheduling: [TimeBlock]
-- mealsPerDay: Int
+- mealsPerDay: Int // reserved for future lunch support
+- aiAggressiveness: Int // 1 = passive suggestions, 5 = aggressive scheduling
 - compactPreferenceString: String // pre-formatted for API
 - notificationsEnabled: Bool
 - defaultReminderMinutes: Int // e.g. 15 — lead time before event
-- perCategoryNotifications: [UUID: Bool] // category id → enabled
+- perCategoryNotificationsData: Data // JSON-encoded [UUID: Bool] (SwiftData limitation)
+- meal planning fields — see section 6.5 (breakfast/dinner windows, knownMealIDs,
+  mealGuidance, newMealSuggestionEnabled, lastNewMealSuggestedDate, suggestion fetch cap)
 
 Meal
 - id: UUID
 - name: String
 - prepTimeMinutes: Int
+- isUserDefined: Bool // false = AI-suggested
+- tags: [String]
 
 ProjectPlan
 - id: UUID

@@ -251,25 +251,18 @@ struct FoodPreferencesView: View {
     private func triggerDailyPass() {
         guard let p = prefs else { return }
         let mealCategory = categories.first { $0.name == "Meal" }
-        let coordinator = MealPlanningCoordinator(
-            aiService: AIService(),
-            mealCategory: mealCategory
-        )
+        let coordinator = MealPlanningCoordinator(mealCategory: mealCategory)
         let events = allEvents
         let meals = allMeals
         let ctx = context
         Task { @MainActor in
-            let result = await coordinator.runDailyPass(
+            let result = coordinator.runDailyPass(
                 existingEvents: events,
                 allMeals: meals,
                 preferences: p
             )
             for event in result.eventsToDelete { ctx.delete(event) }
             for event in result.newEvents { ctx.insert(event) }
-            if let meal = result.newMeal {
-                ctx.insert(meal)
-                p.knownMealIDs.append(meal.id)
-            }
             try? ctx.save()
         }
     }
