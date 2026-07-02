@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 
 struct AddEventView: View {
+    @AppStorage("accentColorHex") private var accentColorHex = "#E8784D"
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
 
@@ -23,16 +24,16 @@ struct AddEventView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.cadenceCream.ignoresSafeArea()
+                Color.appBackground(accentColorHex).ignoresSafeArea()
                 Form {
                     Section("Details") {
                         TextField("Event title", text: $title)
                         DatePicker("Date", selection: $selectedDate, displayedComponents: .date)
-                            .tint(.cadenceOrange)
+                            .tint(.appAccent(accentColorHex))
                         DatePicker("Starts", selection: $startTime, displayedComponents: .hourAndMinute)
-                            .tint(.cadenceOrange)
+                            .tint(.appAccent(accentColorHex))
                         DatePicker("Ends", selection: $endTime, displayedComponents: .hourAndMinute)
-                            .tint(.cadenceOrange)
+                            .tint(.appAccent(accentColorHex))
                     }
 
                     Section("Category") {
@@ -49,7 +50,7 @@ struct AddEventView: View {
                                     Spacer()
                                     if selectedCategory?.id == cat.id {
                                         Image(systemName: "checkmark")
-                                            .foregroundColor(.cadenceOrange)
+                                            .foregroundColor(.appAccent(accentColorHex))
                                     }
                                 }
                             }
@@ -63,12 +64,12 @@ struct AddEventView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
-                        .foregroundColor(.cadenceOrange)
+                        .foregroundColor(.appAccent(accentColorHex))
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") { attemptSave() }
                         .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
-                        .foregroundColor(title.trimmingCharacters(in: .whitespaces).isEmpty ? .secondary : .cadenceOrange)
+                        .foregroundColor(title.trimmingCharacters(in: .whitespaces).isEmpty ? .secondary : .appAccent(accentColorHex))
                 }
             }
             .alert("Scheduling Conflict", isPresented: $showConflictAlert) {

@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 
 struct CategorySettingsView: View {
+    @AppStorage("accentColorHex") private var accentColorHex = "#E8784D"
     @Query(sort: \Category.name) private var categories: [Category]
     @Environment(\.modelContext) private var context
 
@@ -9,7 +10,7 @@ struct CategorySettingsView: View {
 
     var body: some View {
         ZStack {
-            Color.cadenceCream.ignoresSafeArea()
+            Color.appBackground(accentColorHex).ignoresSafeArea()
 
             List {
                 ForEach(categories) { cat in
@@ -30,11 +31,11 @@ struct CategorySettingsView: View {
         }
         .navigationTitle("Categories")
         .navigationBarTitleDisplayMode(.large)
-        .toolbarBackground(Color.cadenceCream, for: .navigationBar)
+        .toolbarBackground(Color.appBackground(accentColorHex), for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button { showingAdd = true } label: {
-                    Image(systemName: "plus").foregroundColor(.cadenceOrange)
+                    Image(systemName: "plus").foregroundColor(.appAccent(accentColorHex))
                 }
             }
         }
@@ -67,6 +68,7 @@ private struct CategoryRow: View {
 // MARK: - Add Category
 
 struct AddCategoryView: View {
+    @AppStorage("accentColorHex") private var accentColorHex = "#E8784D"
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
 
@@ -83,7 +85,7 @@ struct AddCategoryView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.cadenceCream.ignoresSafeArea()
+                Color.appBackground(accentColorHex).ignoresSafeArea()
                 VStack(spacing: 20) {
                     // Preview
                     HStack(spacing: 12) {
@@ -144,12 +146,12 @@ struct AddCategoryView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }.foregroundColor(.cadenceOrange)
+                    Button("Cancel") { dismiss() }.foregroundColor(.appAccent(accentColorHex))
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add") { save() }
                         .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
-                        .foregroundColor(.cadenceOrange)
+                        .foregroundColor(.appAccent(accentColorHex))
                 }
             }
         }
@@ -168,6 +170,7 @@ struct AddCategoryView: View {
 // MARK: - Edit Category
 
 struct EditCategoryView: View {
+    @AppStorage("accentColorHex") private var accentColorHex = "#E8784D"
     let category: Category
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
@@ -185,7 +188,7 @@ struct EditCategoryView: View {
 
     var body: some View {
         ZStack {
-            Color.cadenceCream.ignoresSafeArea()
+            Color.appBackground(accentColorHex).ignoresSafeArea()
             VStack(spacing: 20) {
                 // Preview
                 HStack(spacing: 12) {
@@ -240,12 +243,12 @@ struct EditCategoryView: View {
         }
         .navigationTitle("Edit Category")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(Color.cadenceCream, for: .navigationBar)
+        .toolbarBackground(Color.appBackground(accentColorHex), for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Save") { save() }
                     .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
-                    .foregroundColor(.cadenceOrange)
+                    .foregroundColor(.appAccent(accentColorHex))
             }
         }
     }

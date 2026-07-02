@@ -21,7 +21,7 @@ struct EventDetailView: View {
 
     var body: some View {
         ZStack {
-            Color.cadenceCream.ignoresSafeArea()
+            Color.appBackground(accentColorHex).ignoresSafeArea()
             VStack(alignment: .leading, spacing: 12) {
                 // Title card
                 HStack(spacing: 14) {
@@ -91,7 +91,7 @@ struct EventDetailView: View {
         }
         .navigationTitle(event.title)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(Color.cadenceCream, for: .navigationBar)
+        .toolbarBackground(Color.appBackground(accentColorHex), for: .navigationBar)
     }
 
     // MARK: - Mark actions
@@ -148,7 +148,7 @@ struct EventDetailView: View {
         if let hex = event.category?.colorHex {
             return Color(hex: hex)
         }
-        return .cadenceOrangeLight
+        return .accentLight(accentColorHex)
     }
 
     @ViewBuilder

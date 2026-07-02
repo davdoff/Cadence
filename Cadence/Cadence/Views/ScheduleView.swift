@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 
 struct ScheduleView: View {
+    @AppStorage("accentColorHex") private var accentColorHex = "#E8784D"
     @Query(sort: \Event.startTime) private var allEvents: [Event]
     @Query private var categories: [Category]
     @Environment(\.modelContext) private var context
@@ -12,13 +13,13 @@ struct ScheduleView: View {
 
     var body: some View {
         ZStack {
-            Color.cadenceCream.ignoresSafeArea()
+            Color.appBackground(accentColorHex).ignoresSafeArea()
 
             VStack(spacing: 0) {
                 // Week strip
                 weekStrip
                     .padding(.vertical, 10)
-                    .background(Color.cadenceCream)
+                    .background(Color.appBackground(accentColorHex))
 
                 // Meals this week entry point
                 NavigationLink { WeeklyMealsView() } label: {
@@ -32,7 +33,7 @@ struct ScheduleView: View {
                             .font(.caption.weight(.semibold))
                             .foregroundColor(.secondary.opacity(0.4))
                     }
-                    .foregroundColor(.cadenceOrange)
+                    .foregroundColor(.appAccent(accentColorHex))
                     .padding(.horizontal, 16).padding(.vertical, 10)
                     .background(Color.white)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -53,14 +54,14 @@ struct ScheduleView: View {
                 categoryFilter
                     .padding(.bottom, 6)
 
-                Divider().overlay(Color.cadenceCreamDeep)
+                Divider().overlay(Color.appDeep(accentColorHex))
 
                 dayEventList
             }
         }
         .navigationTitle("Schedule")
         .navigationBarTitleDisplayMode(.large)
-        .toolbarBackground(Color.cadenceCream, for: .navigationBar)
+        .toolbarBackground(Color.appBackground(accentColorHex), for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
@@ -68,7 +69,7 @@ struct ScheduleView: View {
                 } label: {
                     Text("Today")
                         .font(.caption.weight(.semibold))
-                        .foregroundColor(.cadenceOrange)
+                        .foregroundColor(.appAccent(accentColorHex))
                 }
             }
         }
@@ -125,14 +126,14 @@ struct ScheduleView: View {
                     .foregroundColor(isSelected ? .white : .secondary)
                 Text("\(dayNumber)")
                     .font(.subheadline.weight(isToday ? .bold : .regular))
-                    .foregroundColor(isSelected ? .white : (isToday ? .cadenceOrange : .primary))
+                    .foregroundColor(isSelected ? .white : (isToday ? .appAccent(accentColorHex) : .primary))
                 Circle()
-                    .fill(isSelected ? Color.white.opacity(0.6) : Color.cadenceOrange)
+                    .fill(isSelected ? Color.white.opacity(0.6) : Color.appAccent(accentColorHex))
                     .frame(width: 5, height: 5)
                     .opacity(hasEvents ? 1 : 0)
             }
             .frame(width: 42, height: 62)
-            .background(isSelected ? Color.cadenceOrange : Color.clear)
+            .background(isSelected ? Color.appAccent(accentColorHex) : Color.clear)
             .clipShape(RoundedRectangle(cornerRadius: 14))
         }
         .buttonStyle(.plain)
@@ -163,9 +164,9 @@ struct ScheduleView: View {
 
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 3).fill(Color.cadenceCreamDeep)
+                    RoundedRectangle(cornerRadius: 3).fill(Color.appDeep(accentColorHex))
                     RoundedRectangle(cornerRadius: 3)
-                        .fill(Color.cadenceOrange)
+                        .fill(Color.appAccent(accentColorHex))
                         .frame(width: geo.size.width * rate)
                         .animation(.easeOut(duration: 0.4), value: rate)
                 }
@@ -174,7 +175,7 @@ struct ScheduleView: View {
 
             Text("\(Int(rate * 100))%")
                 .font(.caption.weight(.semibold))
-                .foregroundColor(.cadenceOrange)
+                .foregroundColor(.appAccent(accentColorHex))
                 .frame(minWidth: 34, alignment: .trailing)
         }
         .frame(height: 18)
@@ -200,7 +201,7 @@ struct ScheduleView: View {
             ? selectedCategory == nil
             : selectedCategory?.id == cat!.id
 
-        let chipColor: Color = cat == nil ? .cadenceOrange : Color(hex: cat!.colorHex)
+        let chipColor: Color = cat == nil ? .appAccent(accentColorHex) : Color(hex: cat!.colorHex)
 
         return Button {
             withAnimation(.spring(duration: 0.2)) {
@@ -217,7 +218,7 @@ struct ScheduleView: View {
             }
             .font(.caption.weight(.semibold))
             .padding(.horizontal, 12).padding(.vertical, 6)
-            .background(isSelected ? chipColor : Color.cadenceCreamDeep)
+            .background(isSelected ? chipColor : Color.appDeep(accentColorHex))
             .foregroundColor(isSelected ? .white : .secondary)
             .clipShape(Capsule())
         }
@@ -231,7 +232,7 @@ struct ScheduleView: View {
         if filteredDayEvents.isEmpty {
             VStack(spacing: 12) {
                 Image(systemName: "moon.zzz")
-                    .font(.system(size: 40)).foregroundColor(.cadenceOrangeLight)
+                    .font(.system(size: 40)).foregroundColor(.accentLight(accentColorHex))
                 Text(selectedCategory == nil ? "No events" : "No \(selectedCategory!.name) events")
                     .font(.subheadline).foregroundColor(.secondary)
             }

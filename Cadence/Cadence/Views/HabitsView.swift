@@ -4,6 +4,7 @@ import SwiftData
 // MARK: - HabitsView
 
 struct HabitsView: View {
+    @AppStorage("accentColorHex") private var accentColorHex = "#E8784D"
     @Query private var habits: [Habit]
     @Environment(\.modelContext) private var context
 
@@ -46,7 +47,7 @@ struct HabitsView: View {
 
     var body: some View {
         ZStack {
-            Color.cadenceCream.ignoresSafeArea()
+            Color.appBackground(accentColorHex).ignoresSafeArea()
             if habits.isEmpty {
                 emptyState
             } else {
@@ -64,19 +65,19 @@ struct HabitsView: View {
         }
         .navigationTitle("Habits")
         .navigationBarTitleDisplayMode(.large)
-        .toolbarBackground(Color.cadenceCream, for: .navigationBar)
+        .toolbarBackground(Color.appBackground(accentColorHex), for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button {
                     withAnimation(.spring(duration: 0.25)) { compact.toggle() }
                 } label: {
                     Image(systemName: compact ? "rectangle.grid.1x2.fill" : "square.grid.2x2.fill")
-                        .foregroundColor(.cadenceOrange)
+                        .foregroundColor(.appAccent(accentColorHex))
                 }
             }
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button { showingAddHabit = true } label: {
-                    Image(systemName: "plus").foregroundColor(.cadenceOrange)
+                    Image(systemName: "plus").foregroundColor(.appAccent(accentColorHex))
                 }
             }
         }
@@ -91,12 +92,12 @@ struct HabitsView: View {
             VStack(spacing: 8) {
                 ZStack {
                     Circle()
-                        .stroke(Color.cadenceCreamDeep, lineWidth: 9)
+                        .stroke(Color.appDeep(accentColorHex), lineWidth: 9)
                     Circle()
                         .trim(from: 0, to: overallRate)
                         .stroke(
                             LinearGradient(
-                                colors: [.cadenceOrangeLight, .cadenceOrange],
+                                colors: [.accentLight(accentColorHex), .appAccent(accentColorHex)],
                                 startPoint: .topLeading, endPoint: .bottomTrailing
                             ),
                             style: StrokeStyle(lineWidth: 9, lineCap: .round)
@@ -105,25 +106,25 @@ struct HabitsView: View {
                         .animation(.spring(duration: 0.5), value: overallRate)
                     Text("\(Int(overallRate * 100))%")
                         .font(.system(size: 14, weight: .bold))
-                        .foregroundColor(.cadenceOrange)
+                        .foregroundColor(.appAccent(accentColorHex))
                 }
                 .frame(width: 64, height: 64)
                 Text("Daily goal").font(.caption2).foregroundColor(.secondary)
             }
             .frame(maxWidth: .infinity)
 
-            Rectangle().fill(Color.cadenceCreamDeep).frame(width: 1, height: 52)
+            Rectangle().fill(Color.appDeep(accentColorHex)).frame(width: 1, height: 52)
 
             VStack(spacing: 4) {
                 Text("\(totalGoodToday)")
                     .font(.system(size: 32, weight: .bold, design: .rounded))
-                    .foregroundColor(.cadenceOrange)
+                    .foregroundColor(.appAccent(accentColorHex))
                     .contentTransition(.numericText())
                 Text("good logged").font(.caption2).foregroundColor(.secondary)
             }
             .frame(maxWidth: .infinity)
 
-            Rectangle().fill(Color.cadenceCreamDeep).frame(width: 1, height: 52)
+            Rectangle().fill(Color.appDeep(accentColorHex)).frame(width: 1, height: 52)
 
             VStack(spacing: 4) {
                 Text("\(totalBadToday)")
@@ -153,13 +154,13 @@ struct HabitsView: View {
                         Text(f.rawValue)
                             .font(.caption.weight(.semibold))
                             .padding(.horizontal, 10).padding(.vertical, 6)
-                            .background(filter == f ? Color.cadenceOrange : Color.clear)
+                            .background(filter == f ? Color.appAccent(accentColorHex) : Color.clear)
                             .foregroundColor(filter == f ? .white : .secondary)
                     }
                     .buttonStyle(.plain)
                 }
             }
-            .background(Color.cadenceCreamDeep)
+            .background(Color.appDeep(accentColorHex))
             .clipShape(Capsule())
 
             Spacer()
@@ -179,9 +180,9 @@ struct HabitsView: View {
                     Text(sort.rawValue).font(.caption.weight(.semibold))
                     Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
                 }
-                .foregroundColor(.cadenceOrange)
+                .foregroundColor(.appAccent(accentColorHex))
                 .padding(.horizontal, 12).padding(.vertical, 7)
-                .background(Color.cadenceCreamDeep)
+                .background(Color.appDeep(accentColorHex))
                 .clipShape(Capsule())
             }
         }
@@ -216,11 +217,11 @@ struct HabitsView: View {
         VStack(spacing: 18) {
             ZStack {
                 Circle()
-                    .fill(Color.cadenceOrange.opacity(0.12))
+                    .fill(Color.appAccent(accentColorHex).opacity(0.12))
                     .frame(width: 90, height: 90)
                 Image(systemName: "bolt.heart.fill")
                     .font(.system(size: 40))
-                    .foregroundColor(.cadenceOrange)
+                    .foregroundColor(.appAccent(accentColorHex))
             }
             Text("No habits yet")
                 .font(.headline).foregroundColor(.secondary)
@@ -232,7 +233,7 @@ struct HabitsView: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundColor(.white)
                     .padding(.horizontal, 24).padding(.vertical, 12)
-                    .background(Color.cadenceOrange)
+                    .background(Color.appAccent(accentColorHex))
                     .clipShape(Capsule())
             }
         }
@@ -243,6 +244,7 @@ struct HabitsView: View {
 // MARK: - HabitCard
 
 struct HabitCard: View {
+    @AppStorage("accentColorHex") private var accentColorHex = "#E8784D"
     let habit: Habit
     let compact: Bool
     let onDetail: () -> Void
@@ -358,7 +360,7 @@ struct HabitCard: View {
         VStack(alignment: .leading, spacing: 4) {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 4).fill(Color.cadenceCreamDeep)
+                    RoundedRectangle(cornerRadius: 4).fill(Color.appDeep(accentColorHex))
                     RoundedRectangle(cornerRadius: 4)
                         .fill(dailyDone ? Color.green : accent)
                         .frame(width: geo.size.width * dailyProg)
@@ -384,7 +386,7 @@ struct HabitCard: View {
         VStack(alignment: .leading, spacing: 4) {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 4).fill(Color.cadenceCreamDeep)
+                    RoundedRectangle(cornerRadius: 4).fill(Color.appDeep(accentColorHex))
                     RoundedRectangle(cornerRadius: 4)
                         .fill(weeklyDone ? Color.green : accent.opacity(0.6))
                         .frame(width: geo.size.width * weeklyProg)

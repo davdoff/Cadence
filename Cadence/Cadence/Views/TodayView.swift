@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 
 struct TodayView: View {
+    @AppStorage("accentColorHex") private var accentColorHex = "#E8784D"
     @Query(sort: \Event.startTime) private var allEvents: [Event]
     @Query private var habits: [Habit]
     @Environment(\.modelContext) private var context
@@ -21,10 +22,10 @@ struct TodayView: View {
             case .missed:  return "xmark.circle.fill"
             }
         }
-        var color: Color {
+        func color(_ accentHex: String) -> Color {
             switch self {
-            case .all:     return .cadenceOrange
-            case .pending: return .cadenceOrange
+            case .all:     return .appAccent(accentHex)
+            case .pending: return .appAccent(accentHex)
             case .done:    return .green
             case .missed:  return .red.opacity(0.75)
             }
@@ -60,7 +61,7 @@ struct TodayView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            Color.cadenceCream.ignoresSafeArea()
+            Color.appBackground(accentColorHex).ignoresSafeArea()
 
             VStack(spacing: 0) {
                 headerBlock
@@ -85,7 +86,7 @@ struct TodayView: View {
         }
         .navigationTitle(todayTitle)
         .navigationBarTitleDisplayMode(.large)
-        .toolbarBackground(Color.cadenceCream, for: .navigationBar)
+        .toolbarBackground(Color.appBackground(accentColorHex), for: .navigationBar)
         .sheet(isPresented: $showingAddEvent) { AddEventView() }
         .sheet(isPresented: $showingAIInput)  { AIInputView()  }
     }
@@ -103,7 +104,7 @@ struct TodayView: View {
                     HStack(spacing: 10) {
                         statPill("\(completedToday)/\(todayEvents.count)", icon: "checkmark.circle.fill", color: .green)
                         if pendingToday > 0 {
-                            statPill("\(pendingToday) left", icon: "clock.fill", color: .cadenceOrange)
+                            statPill("\(pendingToday) left", icon: "clock.fill", color: .appAccent(accentColorHex))
                         }
                     }
                 }
@@ -115,13 +116,13 @@ struct TodayView: View {
                 ZStack(alignment: .topTrailing) {
                     Image(systemName: "exclamationmark.circle")
                         .font(.system(size: 22))
-                        .foregroundColor(missedCount > 0 ? .cadenceOrange : .secondary.opacity(0.4))
+                        .foregroundColor(missedCount > 0 ? .appAccent(accentColorHex) : .secondary.opacity(0.4))
                     if missedCount > 0 {
                         Text("\(missedCount)")
                             .font(.system(size: 9, weight: .bold))
                             .foregroundColor(.white)
                             .padding(3)
-                            .background(Color.cadenceOrangeDark)
+                            .background(Color.accentDark(accentColorHex))
                             .clipShape(Circle())
                             .offset(x: 7, y: -7)
                     }
@@ -155,7 +156,7 @@ struct TodayView: View {
                                 .font(.caption.weight(.semibold))
                         }
                         .padding(.horizontal, 12).padding(.vertical, 7)
-                        .background(statusFilter == f ? f.color : Color.cadenceCreamDeep)
+                        .background(statusFilter == f ? f.color(accentColorHex) : Color.appDeep(accentColorHex))
                         .foregroundColor(statusFilter == f ? .white : .secondary)
                         .clipShape(Capsule())
                     }
@@ -186,7 +187,7 @@ struct TodayView: View {
         Section {
             ForEach(events) { event in
                 EventRowView(event: event)
-                    .listRowBackground(Color.cadenceCream)
+                    .listRowBackground(Color.appBackground(accentColorHex))
                     .listRowSeparator(.hidden)
                     .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
                     .swipeActions(edge: .leading, allowsFullSwipe: true) {
@@ -207,7 +208,7 @@ struct TodayView: View {
                     .foregroundColor(.secondary)
                     .textCase(.uppercase)
                 Circle()
-                    .fill(Color.cadenceOrangeLight.opacity(0.6))
+                    .fill(Color.accentLight(accentColorHex).opacity(0.6))
                     .frame(width: 5, height: 5)
                 Text("\(events.count)")
                     .font(.caption2)
@@ -221,9 +222,9 @@ struct TodayView: View {
     private var emptyState: some View {
         VStack(spacing: 16) {
             ZStack {
-                Circle().fill(Color.cadenceOrangeLight.opacity(0.15)).frame(width: 90, height: 90)
+                Circle().fill(Color.accentLight(accentColorHex).opacity(0.15)).frame(width: 90, height: 90)
                 Image(systemName: "calendar.badge.plus")
-                    .font(.system(size: 40)).foregroundColor(.cadenceOrangeLight)
+                    .font(.system(size: 40)).foregroundColor(.accentLight(accentColorHex))
             }
             Text("Nothing scheduled today")
                 .font(.headline).foregroundColor(.secondary)
@@ -237,7 +238,7 @@ struct TodayView: View {
     private var filteredEmpty: some View {
         VStack(spacing: 12) {
             Image(systemName: statusFilter.icon)
-                .font(.system(size: 40)).foregroundColor(statusFilter.color.opacity(0.4))
+                .font(.system(size: 40)).foregroundColor(statusFilter.color(accentColorHex).opacity(0.4))
             Text("No \(statusFilter.rawValue.lowercased()) events today")
                 .font(.subheadline).foregroundColor(.secondary)
         }
@@ -251,9 +252,9 @@ struct TodayView: View {
             Button { showingAIInput = true } label: {
                 Label("Ask AI", systemImage: "sparkles")
                     .font(.subheadline.weight(.semibold))
-                    .foregroundColor(.cadenceOrange)
+                    .foregroundColor(.appAccent(accentColorHex))
                     .padding(.horizontal, 20).padding(.vertical, 12)
-                    .background(Color.cadenceCreamDeep)
+                    .background(Color.appDeep(accentColorHex))
                     .clipShape(Capsule())
             }
             Button { showingAddEvent = true } label: {
@@ -261,7 +262,7 @@ struct TodayView: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundColor(.white)
                     .padding(.horizontal, 20).padding(.vertical, 12)
-                    .background(Color.cadenceOrange)
+                    .background(Color.appAccent(accentColorHex))
                     .clipShape(Capsule())
             }
         }

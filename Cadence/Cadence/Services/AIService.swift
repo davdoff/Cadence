@@ -151,7 +151,7 @@ extension AIService {
     }
 }
 
-// MARK: - Meal Suggestion
+// MARK: - Meal Suggestions
 
 extension AIService {
 
@@ -161,13 +161,14 @@ extension AIService {
         var scheduledEnd: Date
     }
 
-    /// One API call per week maximum (caller must check lastNewMealSuggestedDate before invoking).
-    func suggestNewMeal(
+    /// Returns 2–3 new-meal options for the user to choose from. Callers must respect
+    /// the daily fetch cap (UserPreferences.canFetchMealSuggestion) before invoking.
+    func suggestMealOptions(
         existingMeals: [Meal],
         freeDinnerSlots: [TimeSlot],
         preferences: UserPreferences,
         referenceWeek: [Date]
-    ) async throws -> MealSuggestionResult {
+    ) async throws -> [MealSuggestionResult] {
         let builder = SchedulingContextBuilder()
         let message = builder.build(.mealSuggestion(existingMeals: existingMeals, freeDinnerSlots: freeDinnerSlots), preferences: preferences)
 
@@ -178,33 +179,38 @@ extension AIService {
             rawJSON = try await callProxy(route: "/api/meal/suggestion", systemPrompt: AIService.mealSuggestionSystemPrompt, userPayload: message)
         }
 
-        return try parseMealSuggestion(rawJSON, referenceWeek: referenceWeek, preferences: preferences)
+        return try parseMealSuggestions(rawJSON, referenceWeek: referenceWeek, preferences: preferences)
     }
 
-    private func parseMealSuggestion(
+    private func parseMealSuggestions(
         _ json: String,
         referenceWeek: [Date],
         preferences: UserPreferences
-    ) throws -> MealSuggestionResult {
+    ) throws -> [MealSuggestionResult] {
         guard let data = json.data(using: .utf8),
-              let raw = try? JSONDecoder().decode(RawMealSuggestion.self, from: data)
+              let raw = try? JSONDecoder().decode(RawMealSuggestions.self, from: data)
         else { throw AIServiceError.invalidResponse }
 
-        let meal = Meal(name: raw.meal.name, prepTimeMinutes: raw.meal.prepTimeMinutes, isUserDefined: false)
-        meal.tags = raw.meal.tags
+        // Options with an unparseable slot are dropped rather than failing the batch.
+        let results = raw.meals.compactMap { entry -> MealSuggestionResult? in
+            guard let start = parseSlot(entry.scheduledSlot, referenceWeek: referenceWeek) else { return nil }
 
-        guard let start = parseSlot(raw.meal.scheduledSlot, referenceWeek: referenceWeek) else {
-            throw AIServiceError.invalidResponse
+            let meal = Meal(name: entry.name, prepTimeMinutes: entry.prepTimeMinutes, isUserDefined: false)
+            meal.tags = entry.tags
+
+            let durationMinutes = entry.prepTimeMinutes > 0 ? entry.prepTimeMinutes : 45
+            let windowEnd = Calendar.current.date(
+                bySettingHour: preferences.dinnerWindowEndHour,
+                minute: preferences.dinnerWindowEndMinute,
+                second: 0, of: start
+            ) ?? start.addingTimeInterval(3600)
+            let end = Swift.min(start.addingTimeInterval(TimeInterval(durationMinutes * 60)), windowEnd)
+
+            return MealSuggestionResult(meal: meal, scheduledStart: start, scheduledEnd: end)
         }
-        let durationMinutes = raw.meal.prepTimeMinutes > 0 ? raw.meal.prepTimeMinutes : 45
-        let windowEnd = Calendar.current.date(
-            bySettingHour: preferences.dinnerWindowEndHour,
-            minute: preferences.dinnerWindowEndMinute,
-            second: 0, of: start
-        ) ?? start.addingTimeInterval(3600)
-        let end = Swift.min(start.addingTimeInterval(TimeInterval(durationMinutes * 60)), windowEnd)
 
-        return MealSuggestionResult(meal: meal, scheduledStart: start, scheduledEnd: end)
+        guard !results.isEmpty else { throw AIServiceError.invalidResponse }
+        return results
     }
 
     private func parseSlot(_ slot: String, referenceWeek: [Date]) -> Date? {
@@ -346,14 +352,14 @@ private struct RawProjectPlan: Decodable {
     let phases: [Phase]
 }
 
-private struct RawMealSuggestion: Decodable {
+private struct RawMealSuggestions: Decodable {
     struct MealData: Decodable {
         let name: String
         let prepTimeMinutes: Int
         let tags: [String]
         let scheduledSlot: String
     }
-    let meal: MealData
+    let meals: [MealData]
 }
 
 // MARK: - Private Codable Types

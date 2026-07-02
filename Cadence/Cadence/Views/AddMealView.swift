@@ -12,7 +12,7 @@ struct AddMealView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.cadenceCream.ignoresSafeArea()
+                Color.appBackground(accentColorHex).ignoresSafeArea()
                 Form {
                     Section("Meal Details") {
                         TextField("Name", text: $name)
@@ -23,7 +23,7 @@ struct AddMealView: View {
             }
             .navigationTitle("Add Meal")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Color.cadenceCream, for: .navigationBar)
+            .toolbarBackground(Color.appBackground(accentColorHex), for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }

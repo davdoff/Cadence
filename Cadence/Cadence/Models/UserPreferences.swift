@@ -32,6 +32,9 @@ final class UserPreferences {
     // Free-text guidance for AI meal suggestions (e.g. "vegetarian, more rice dishes").
     // Declaration default (not just init) so existing on-device stores migrate.
     var mealGuidance: String = ""
+    // Daily cap on AI meal-suggestion fetches (declaration defaults for migration).
+    var mealSuggestionFetchCount: Int = 0
+    var mealSuggestionFetchDate: Date? = nil
 
     // AI behaviour: 1 = passive suggestions, 5 = aggressive scheduling
     var aiAggressiveness: Int
@@ -69,6 +72,27 @@ final class UserPreferences {
         newMealSuggestionEnabled = true
         lastNewMealSuggestedDate = nil
         mealGuidance = ""
+        mealSuggestionFetchCount = 0
+        mealSuggestionFetchDate = nil
+    }
+
+    // MARK: - Meal suggestion fetch cap
+
+    static let maxMealSuggestionFetchesPerDay = 2
+
+    func canFetchMealSuggestion(now: Date = Date()) -> Bool {
+        guard let date = mealSuggestionFetchDate,
+              Calendar.current.isDate(date, inSameDayAs: now) else { return true }
+        return mealSuggestionFetchCount < Self.maxMealSuggestionFetchesPerDay
+    }
+
+    func recordMealSuggestionFetch(now: Date = Date()) {
+        if let date = mealSuggestionFetchDate, Calendar.current.isDate(date, inSameDayAs: now) {
+            mealSuggestionFetchCount += 1
+        } else {
+            mealSuggestionFetchCount = 1
+        }
+        mealSuggestionFetchDate = now
     }
 
     func perCategoryNotifications() -> [UUID: Bool] {

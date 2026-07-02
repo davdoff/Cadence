@@ -3,6 +3,7 @@ import SwiftData
 import Charts
 
 struct HabitDetailView: View {
+    @AppStorage("accentColorHex") private var accentColorHex = "#E8784D"
     let habit: Habit
     @Environment(\.modelContext) private var context
 
@@ -15,7 +16,7 @@ struct HabitDetailView: View {
 
     var body: some View {
         ZStack {
-            Color.cadenceCream.ignoresSafeArea()
+            Color.appBackground(accentColorHex).ignoresSafeArea()
             ScrollView {
                 VStack(spacing: 16) {
                     todayCard
@@ -29,7 +30,7 @@ struct HabitDetailView: View {
         }
         .navigationTitle(habit.name)
         .navigationBarTitleDisplayMode(.large)
-        .toolbarBackground(Color.cadenceCream, for: .navigationBar)
+        .toolbarBackground(Color.appBackground(accentColorHex), for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 ZStack {
@@ -102,7 +103,7 @@ struct HabitDetailView: View {
                     }
                     GeometryReader { geo in
                         ZStack(alignment: .leading) {
-                            RoundedRectangle(cornerRadius: 4).fill(Color.cadenceCreamDeep)
+                            RoundedRectangle(cornerRadius: 4).fill(Color.appDeep(accentColorHex))
                             RoundedRectangle(cornerRadius: 4)
                                 .fill(done ? Color.green : accent)
                                 .frame(width: geo.size.width * prog)
@@ -171,7 +172,7 @@ struct HabitDetailView: View {
 
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 5).fill(Color.cadenceCreamDeep)
+                    RoundedRectangle(cornerRadius: 5).fill(Color.appDeep(accentColorHex))
                     RoundedRectangle(cornerRadius: 5)
                         .fill(done ? Color.green : accent)
                         .frame(width: geo.size.width * prog)

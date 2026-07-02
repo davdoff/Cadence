@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 
 struct AddHabitView: View {
+    @AppStorage("accentColorHex") private var accentColorHex = "#E8784D"
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
     @Query private var categories: [Category]
@@ -20,7 +21,7 @@ struct AddHabitView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.cadenceCream.ignoresSafeArea()
+                Color.appBackground(accentColorHex).ignoresSafeArea()
                 ScrollView {
                     VStack(spacing: 20) {
                         previewCard
@@ -144,7 +145,7 @@ struct AddHabitView: View {
                 TextField("Habit name", text: $name)
                     .padding(.vertical, 10)
 
-                Divider().overlay(Color.cadenceCreamDeep)
+                Divider().overlay(Color.appDeep(accentColorHex))
 
                 Picker("Type", selection: $type) {
                     Label("Build it", systemImage: "arrow.up.circle.fill").tag(HabitType.good)
@@ -181,7 +182,7 @@ struct AddHabitView: View {
                     }
                     .padding(.vertical, 10)
 
-                    Divider().overlay(Color.cadenceCreamDeep)
+                    Divider().overlay(Color.appDeep(accentColorHex))
 
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {

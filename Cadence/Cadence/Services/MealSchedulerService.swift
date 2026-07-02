@@ -50,7 +50,9 @@ struct MealSchedulerService {
     // MARK: - Dinner
 
     /// Returns new dinner Events to persist for each day in targetDates that has a free slot.
-    /// Meal and slot selection are both random per spec. Respects bufferMinutes.
+    /// Picks a random free slot first, then a random meal that fits it, so busy days get
+    /// quick meals. Meals cooked or scheduled in the previous 7 days are skipped (falls
+    /// back to the full list when the catalog is too small). Respects bufferMinutes.
     func scheduleDinnerSlots(
         existingEvents: [Event],
         meals: [Meal],
@@ -86,9 +88,8 @@ struct MealSchedulerService {
             let windowStart = Swift.max(rawWindowStart, now)
             guard windowStart < windowEnd else { continue }
 
-            let meal = meals.randomElement()!
-            let durationMinutes = meal.prepTimeMinutes > 0 ? meal.prepTimeMinutes : 45
-            let required = TimeInterval(durationMinutes * 60)
+            let candidates = mealsAvoidingRecentRepeats(meals, targetDate: date, events: allEvents)
+            let shortest = candidates.map { requiredDuration(for: $0) }.min()!
             let buffer = TimeInterval(preferences.bufferMinutes * 60)
 
             let dayEvents = allEvents.filter {
@@ -98,18 +99,58 @@ struct MealSchedulerService {
                 windowStart: windowStart,
                 windowEnd: windowEnd,
                 blocking: dayEvents,
-                required: required,
+                required: shortest,
                 buffer: buffer
             )
             guard let slot = slots.randomElement() else { continue }
 
-            let end = Swift.min(slot.start.addingTimeInterval(required), windowEnd)
+            let fitting = candidates.filter { requiredDuration(for: $0) <= slot.duration }
+            guard let meal = fitting.randomElement() else { continue }
+
+            let end = Swift.min(slot.start.addingTimeInterval(requiredDuration(for: meal)), windowEnd)
             let event = Event(title: meal.name, startTime: slot.start, endTime: end, source: .ai)
             result.append(event)
             allEvents.append(event)
         }
 
         return result
+    }
+
+    // MARK: - Swap
+
+    /// Returns a replacement meal and end time for a dinner event: a different meal that
+    /// fits between the event's start and the earlier of the dinner-window end or the
+    /// next event's start minus buffer. Applies the same recent-repeat filter as
+    /// scheduling. Nil when no alternative fits.
+    func swapDinner(
+        for event: Event,
+        meals: [Meal],
+        existingEvents: [Event],
+        preferences: UserPreferences
+    ) -> (meal: Meal, endTime: Date)? {
+        let calendar = Calendar.current
+        guard let windowEnd = calendar.date(
+            bySettingHour: preferences.dinnerWindowEndHour,
+            minute: preferences.dinnerWindowEndMinute,
+            second: 0, of: event.startTime
+        ) else { return nil }
+
+        let buffer = TimeInterval(preferences.bufferMinutes * 60)
+        let others = existingEvents.filter { $0.id != event.id }
+        var limit = windowEnd
+        if let nextStart = others
+            .filter({ $0.status != .missed && $0.startTime > event.startTime })
+            .map(\.startTime)
+            .min() {
+            limit = Swift.min(limit, nextStart.addingTimeInterval(-buffer))
+        }
+        let available = limit.timeIntervalSince(event.startTime)
+        guard available > 0 else { return nil }
+
+        let candidates = mealsAvoidingRecentRepeats(meals, targetDate: event.startTime, events: others)
+            .filter { $0.name != event.title && requiredDuration(for: $0) <= available }
+        guard let meal = candidates.randomElement() else { return nil }
+        return (meal, event.startTime.addingTimeInterval(requiredDuration(for: meal)))
     }
 
     // MARK: - Free Slots After Dinner Scheduling
@@ -194,6 +235,25 @@ struct MealSchedulerService {
     }
 
     // MARK: - Private
+
+    private func requiredDuration(for meal: Meal) -> TimeInterval {
+        TimeInterval((meal.prepTimeMinutes > 0 ? meal.prepTimeMinutes : 45) * 60)
+    }
+
+    /// Meals whose name doesn't appear on a non-missed event in the 7 days before
+    /// targetDate. Falls back to the full list when everything is recent.
+    private func mealsAvoidingRecentRepeats(_ meals: [Meal], targetDate: Date, events: [Event]) -> [Meal] {
+        let calendar = Calendar.current
+        let dayStart = calendar.startOfDay(for: targetDate)
+        guard let lookbackStart = calendar.date(byAdding: .day, value: -7, to: dayStart) else { return meals }
+        let recentTitles = Set(
+            events
+                .filter { $0.status != .missed && $0.startTime >= lookbackStart && $0.startTime < dayStart }
+                .map(\.title)
+        )
+        let fresh = meals.filter { !recentTitles.contains($0.name) }
+        return fresh.isEmpty ? meals : fresh
+    }
 
     private func freeSlotsInWindow(
         windowStart: Date,

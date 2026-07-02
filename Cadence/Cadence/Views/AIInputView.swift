@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 
 struct AIInputView: View {
+    @AppStorage("accentColorHex") private var accentColorHex = "#E8784D"
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
 
@@ -17,7 +18,7 @@ struct AIInputView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.cadenceCream.ignoresSafeArea()
+                Color.appBackground(accentColorHex).ignoresSafeArea()
                 ScrollView {
                     VStack(spacing: 16) {
                         inputRow
@@ -40,7 +41,7 @@ struct AIInputView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
-                        .foregroundColor(.cadenceOrange)
+                        .foregroundColor(.appAccent(accentColorHex))
                 }
             }
         }
@@ -60,7 +61,7 @@ struct AIInputView: View {
             Button(action: submit) {
                 Image(systemName: "arrow.up.circle.fill")
                     .font(.system(size: 38))
-                    .foregroundColor(canSubmit ? .cadenceOrange : .cadenceOrangeLight)
+                    .foregroundColor(canSubmit ? .appAccent(accentColorHex) : .accentLight(accentColorHex))
             }
             .disabled(!canSubmit || isLoading)
         }
@@ -88,7 +89,7 @@ struct AIInputView: View {
         VStack(alignment: .leading, spacing: 14) {
             Label("AI Suggestion", systemImage: "sparkles")
                 .font(.caption.weight(.semibold))
-                .foregroundColor(.cadenceOrange)
+                .foregroundColor(.appAccent(accentColorHex))
 
             VStack(alignment: .leading, spacing: 6) {
                 Text(draft.title)
@@ -100,7 +101,7 @@ struct AIInputView: View {
                     Text(draft.categoryName)
                         .font(.caption)
                         .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(Color.cadenceOrangeLight.opacity(0.25))
+                        .background(Color.accentLight(accentColorHex).opacity(0.25))
                         .clipShape(Capsule())
                 }
             }
@@ -112,13 +113,13 @@ struct AIInputView: View {
             Button("Confirm & Add") { insertDraft(draft) }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 13)
-                .background(Color.cadenceOrange)
+                .background(Color.appAccent(accentColorHex))
                 .foregroundColor(.white)
                 .font(.subheadline.weight(.semibold))
                 .clipShape(RoundedRectangle(cornerRadius: 14))
         }
         .padding()
-        .background(Color.cadenceCreamDeep)
+        .background(Color.appDeep(accentColorHex))
         .clipShape(RoundedRectangle(cornerRadius: 18))
     }
 
@@ -146,7 +147,7 @@ struct AIInputView: View {
             }
         }
         .padding()
-        .background(Color.cadenceCreamDeep)
+        .background(Color.appDeep(accentColorHex))
         .clipShape(RoundedRectangle(cornerRadius: 18))
     }
 
@@ -154,14 +155,14 @@ struct AIInputView: View {
         VStack(alignment: .leading, spacing: 14) {
             Label("Suggested Slots", systemImage: "sparkles")
                 .font(.caption.weight(.semibold))
-                .foregroundColor(.cadenceOrange)
+                .foregroundColor(.appAccent(accentColorHex))
 
             ForEach(Array(drafts.enumerated()), id: \.offset) { _, draft in
                 slotButton(EventDraft(title: description, start: draft.start, end: draft.end, categoryName: draft.categoryName))
             }
         }
         .padding()
-        .background(Color.cadenceCreamDeep)
+        .background(Color.appDeep(accentColorHex))
         .clipShape(RoundedRectangle(cornerRadius: 18))
     }
 
@@ -169,12 +170,12 @@ struct AIInputView: View {
         Button { insertDraft(draft) } label: {
             HStack {
                 Image(systemName: "clock")
-                    .foregroundColor(.cadenceOrange)
+                    .foregroundColor(.appAccent(accentColorHex))
                 Text(formatSlot(start: draft.start, end: draft.end))
                     .foregroundColor(.primary)
                 Spacer()
                 Image(systemName: "plus.circle.fill")
-                    .foregroundColor(.cadenceOrange)
+                    .foregroundColor(.appAccent(accentColorHex))
             }
             .padding()
             .background(Color.white)
@@ -186,7 +187,7 @@ struct AIInputView: View {
 
     private var loadingView: some View {
         VStack(spacing: 12) {
-            ProgressView().tint(.cadenceOrange).scaleEffect(1.4)
+            ProgressView().tint(.appAccent(accentColorHex)).scaleEffect(1.4)
             Text("Thinking…")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
@@ -199,7 +200,7 @@ struct AIInputView: View {
         VStack(spacing: 10) {
             Image(systemName: "sparkles")
                 .font(.system(size: 40))
-                .foregroundColor(.cadenceOrangeLight)
+                .foregroundColor(.accentLight(accentColorHex))
             Text("Describe an event in plain language and AI will find the best slot.")
                 .font(.subheadline)
                 .foregroundColor(.secondary)

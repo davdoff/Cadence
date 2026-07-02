@@ -299,6 +299,108 @@ final class MealSchedulerServiceTests: XCTestCase {
         XCTAssertTrue(result.isEmpty)
     }
 
+    // MARK: - Dinner: prep-time-aware picks
+
+    func testDinnerShortSlotOnlyFitsQuickMeal() {
+        let prefs = makePrefs()
+        prefs.dinnerWindowStartHour = 19
+        prefs.dinnerWindowEndHour = 22
+        prefs.bufferMinutes = 0
+
+        let quick = makeMeal(name: "Stir Fry", prep: 30)
+        let slow = makeMeal(name: "Roast", prep: 120)
+        // Only 19:00–19:50 free tomorrow: fits the 30-min meal, not the 120-min one
+        let blocker = makeEvent(title: "Call", start: at(19, 50, daysFromNow: 1), end: at(22, 0, daysFromNow: 1))
+        let target = Calendar.current.startOfDay(for: at(0, daysFromNow: 1))
+
+        let result = service.scheduleDinnerSlots(
+            existingEvents: [blocker],
+            meals: [quick, slow],
+            preferences: prefs,
+            targetDates: [target],
+            now: startOfToday
+        )
+
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result.first?.title, "Stir Fry")
+    }
+
+    // MARK: - Dinner: no repeats within 7 days
+
+    func testDinnerSkipsMealCookedRecently() {
+        let prefs = makePrefs()
+        let pasta = makeMeal(name: "Pasta", prep: 30)
+        let curry = makeMeal(name: "Curry", prep: 30)
+        let cooked = makeEvent(title: "Pasta", start: at(19, daysFromNow: -2), end: at(20, daysFromNow: -2), status: .completed, source: .ai)
+        let target = Calendar.current.startOfDay(for: at(0, daysFromNow: 1))
+
+        let result = service.scheduleDinnerSlots(
+            existingEvents: [cooked],
+            meals: [pasta, curry],
+            preferences: prefs,
+            targetDates: [target],
+            now: startOfToday
+        )
+
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result.first?.title, "Curry", "A meal cooked 2 days ago must not be re-picked")
+    }
+
+    func testDinnerFallsBackWhenAllMealsRecent() {
+        let prefs = makePrefs()
+        let pasta = makeMeal(name: "Pasta", prep: 30)
+        let cooked = makeEvent(title: "Pasta", start: at(19, daysFromNow: -1), end: at(20, daysFromNow: -1), status: .completed, source: .ai)
+        let target = Calendar.current.startOfDay(for: at(0, daysFromNow: 1))
+
+        let result = service.scheduleDinnerSlots(
+            existingEvents: [cooked],
+            meals: [pasta],
+            preferences: prefs,
+            targetDates: [target],
+            now: startOfToday
+        )
+
+        XCTAssertEqual(result.first?.title, "Pasta", "With a one-meal catalog the repeat filter must fall back, not skip dinner")
+    }
+
+    // MARK: - swapDinner
+
+    func testSwapDinnerPicksDifferentFittingMeal() {
+        let prefs = makePrefs() // dinner window ends 22:00
+        let pasta = makeMeal(name: "Pasta", prep: 30)
+        let curry = makeMeal(name: "Curry", prep: 30)
+        let dinner = makeEvent(title: "Pasta", start: at(19, daysFromNow: 1), end: at(19, 30, daysFromNow: 1), source: .ai)
+
+        let result = service.swapDinner(
+            for: dinner,
+            meals: [pasta, curry],
+            existingEvents: [dinner],
+            preferences: prefs
+        )
+
+        XCTAssertEqual(result?.meal.name, "Curry")
+        XCTAssertEqual(result?.endTime, at(19, 30, daysFromNow: 1))
+    }
+
+    func testSwapDinnerNilWhenNothingElseFits() {
+        let prefs = makePrefs()
+        prefs.bufferMinutes = 15
+        let pasta = makeMeal(name: "Pasta", prep: 30)
+        let roast = makeMeal(name: "Roast", prep: 120)
+        let dinner = makeEvent(title: "Pasta", start: at(19, daysFromNow: 1), end: at(19, 30, daysFromNow: 1), source: .ai)
+        // Next event at 20:00 → only 45 min available (with buffer); the 120-min roast can't fit
+        let next = makeEvent(title: "Call", start: at(20, daysFromNow: 1), end: at(21, daysFromNow: 1))
+
+        let result = service.swapDinner(
+            for: dinner,
+            meals: [pasta, roast],
+            existingEvents: [dinner, next],
+            preferences: prefs
+        )
+
+        XCTAssertNil(result)
+    }
+
     // MARK: - Day-start scheduling: past times are never scheduled
 
     func testBreakfastSkippedWhenTimeAlreadyPassed() {

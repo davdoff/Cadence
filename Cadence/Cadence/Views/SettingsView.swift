@@ -31,7 +31,7 @@ struct SettingsView: View {
 
     var body: some View {
         ZStack {
-            Color.cadenceCream.ignoresSafeArea()
+            Color.appBackground(accentColorHex).ignoresSafeArea()
             Form {
 
                 // Personalisation
@@ -166,7 +166,7 @@ struct SettingsView: View {
         }
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.large)
-        .toolbarBackground(Color.cadenceCream, for: .navigationBar)
+        .toolbarBackground(Color.appBackground(accentColorHex), for: .navigationBar)
         .onAppear(perform: loadPrefs)
     }
 
@@ -265,7 +265,7 @@ struct CategoryNotificationsView: View {
 
     var body: some View {
         ZStack {
-            Color.cadenceCream.ignoresSafeArea()
+            Color.appBackground(accentColorHex).ignoresSafeArea()
             List {
                 Section {
                     ForEach(categories) { cat in
@@ -292,7 +292,7 @@ struct CategoryNotificationsView: View {
         }
         .navigationTitle("Per-Category Alerts")
         .navigationBarTitleDisplayMode(.large)
-        .toolbarBackground(Color.cadenceCream, for: .navigationBar)
+        .toolbarBackground(Color.appBackground(accentColorHex), for: .navigationBar)
         .onAppear {
             perCatNotifs = prefs?.perCategoryNotifications() ?? [:]
         }

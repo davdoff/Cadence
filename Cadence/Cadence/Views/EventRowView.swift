@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct EventRowView: View {
+    @AppStorage("accentColorHex") private var accentColorHex = "#E8784D"
     let event: Event
     var onEdit: (() -> Void)? = nil
 
@@ -34,7 +35,7 @@ struct EventRowView: View {
                         .font(.caption.weight(.semibold))
                         .foregroundColor(.secondary)
                         .padding(8)
-                        .background(Color.cadenceCreamDeep)
+                        .background(Color.appDeep(accentColorHex))
                         .clipShape(Circle())
                 }
                 .buttonStyle(.plain)
@@ -52,7 +53,7 @@ struct EventRowView: View {
         if let hex = event.category?.colorHex {
             return Color(hex: hex)
         }
-        return .cadenceOrangeLight
+        return .accentLight(accentColorHex)
     }
 
     @ViewBuilder

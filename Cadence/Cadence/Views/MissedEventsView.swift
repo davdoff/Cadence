@@ -2,6 +2,7 @@ import SwiftUI
 import SwiftData
 
 struct MissedEventsView: View {
+    @AppStorage("accentColorHex") private var accentColorHex = "#E8784D"
     @Environment(\.modelContext) private var context
     @Query(sort: \Event.startTime, order: .reverse) private var allEvents: [Event]
 
@@ -14,7 +15,7 @@ struct MissedEventsView: View {
 
     var body: some View {
         ZStack {
-            Color.cadenceCream.ignoresSafeArea()
+            Color.appBackground(accentColorHex).ignoresSafeArea()
 
             if missedEvents.isEmpty {
                 emptyState
@@ -24,7 +25,7 @@ struct MissedEventsView: View {
         }
         .navigationTitle("Missed")
         .navigationBarTitleDisplayMode(.large)
-        .toolbarBackground(Color.cadenceCream, for: .navigationBar)
+        .toolbarBackground(Color.appBackground(accentColorHex), for: .navigationBar)
         .sheet(isPresented: $showingReschedule) {
             AddEventView(prefillTitle: rescheduleTitle)
         }
@@ -36,7 +37,7 @@ struct MissedEventsView: View {
         VStack(spacing: 14) {
             Image(systemName: "checkmark.seal.fill")
                 .font(.system(size: 52))
-                .foregroundColor(.cadenceOrangeLight)
+                .foregroundColor(.accentLight(accentColorHex))
             Text("Nothing missed")
                 .font(.headline)
                 .foregroundColor(.secondary)
@@ -47,7 +48,7 @@ struct MissedEventsView: View {
         List {
             ForEach(missedEvents) { event in
                 EventRowView(event: event)
-                    .listRowBackground(Color.cadenceCream)
+                    .listRowBackground(Color.appBackground(accentColorHex))
                     .listRowSeparator(.hidden)
                     .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
                     .swipeActions(edge: .leading, allowsFullSwipe: true) {
@@ -56,7 +57,7 @@ struct MissedEventsView: View {
                         } label: {
                             Label("Reschedule", systemImage: "arrow.clockwise")
                         }
-                        .tint(.cadenceOrange)
+                        .tint(.appAccent(accentColorHex))
                     }
                     .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                         Button(role: .destructive) {

@@ -169,7 +169,7 @@ final class AIServiceTests: XCTestCase {
     }
 
     /// Builds a 7-day array where Wednesday is guaranteed to be included.
-    /// Used for suggestNewMeal tests that parse a "WED HH:mm" slot string.
+    /// Used for suggestMealOptions tests that parse a "WED HH:mm" slot string.
     func makeWeekContainingWednesday() -> [Date] {
         let cal = Calendar.current
         let today = cal.startOfDay(for: Date())
@@ -222,67 +222,83 @@ final class AIServiceTests: XCTestCase {
         XCTAssertEqual(result, expected)
     }
 
-    // MARK: - suggestNewMeal
+    // MARK: - suggestMealOptions
 
-    func testSuggestNewMealParsesSuccessfulResponse() async throws {
-        let json = """
+    func optionsJSON() -> String {
+        """
         {
-          "meal": {
-            "name": "Thai Green Curry",
-            "prepTimeMinutes": 40,
-            "tags": ["spicy", "one-pot"],
-            "scheduledSlot": "WED 20:00"
-          }
+          "meals": [
+            { "name": "Thai Green Curry", "prepTimeMinutes": 40, "tags": ["spicy", "one-pot"], "scheduledSlot": "WED 20:00" },
+            { "name": "Shakshuka", "prepTimeMinutes": 25, "tags": ["vegetarian"], "scheduledSlot": "WED 19:30" },
+            { "name": "Beef Tacos", "prepTimeMinutes": 30, "tags": ["quick"], "scheduledSlot": "WED 20:30" }
+          ]
         }
         """
-        var service = AIService()
-        service._callAPI = { _ in json }
-        let prefs = makePrefs()
+    }
 
-        let result = try await service.suggestNewMeal(
+    func testSuggestMealOptionsParsesAllOptions() async throws {
+        var service = AIService()
+        service._callAPI = { _ in self.optionsJSON() }
+
+        let results = try await service.suggestMealOptions(
             existingMeals: [],
             freeDinnerSlots: [],
-            preferences: prefs,
+            preferences: makePrefs(),
             referenceWeek: makeWeekContainingWednesday()
         )
 
-        XCTAssertEqual(result.meal.name, "Thai Green Curry")
-        XCTAssertEqual(result.meal.prepTimeMinutes, 40)
-        XCTAssertEqual(result.meal.tags, ["spicy", "one-pot"])
+        XCTAssertEqual(results.count, 3)
+        XCTAssertEqual(results[0].meal.name, "Thai Green Curry")
+        XCTAssertEqual(results[0].meal.prepTimeMinutes, 40)
+        XCTAssertEqual(results[0].meal.tags, ["spicy", "one-pot"])
+        XCTAssertEqual(results[1].meal.name, "Shakshuka")
+        XCTAssertEqual(results[2].meal.name, "Beef Tacos")
 
-        let comps = Calendar.current.dateComponents([.hour, .minute], from: result.scheduledStart)
+        let comps = Calendar.current.dateComponents([.hour, .minute], from: results[0].scheduledStart)
         XCTAssertEqual(comps.hour,   20)
         XCTAssertEqual(comps.minute, 0)
     }
 
-    func testSuggestNewMealSetsIsUserDefinedFalse() async throws {
+    func testSuggestMealOptionsSetsIsUserDefinedFalse() async throws {
+        var service = AIService()
+        service._callAPI = { _ in self.optionsJSON() }
+
+        let results = try await service.suggestMealOptions(
+            existingMeals: [], freeDinnerSlots: [],
+            preferences: makePrefs(), referenceWeek: makeWeekContainingWednesday()
+        )
+
+        XCTAssertTrue(results.allSatisfy { !$0.meal.isUserDefined },
+                      "AI-suggested meals must have isUserDefined = false")
+    }
+
+    func testSuggestMealOptionsDropsUnparseableSlot() async throws {
         let json = """
         {
-          "meal": {
-            "name": "Shakshuka",
-            "prepTimeMinutes": 25,
-            "tags": [],
-            "scheduledSlot": "WED 19:30"
-          }
+          "meals": [
+            { "name": "Curry", "prepTimeMinutes": 30, "tags": [], "scheduledSlot": "WED 20:00" },
+            { "name": "Bad Slot", "prepTimeMinutes": 30, "tags": [], "scheduledSlot": "nonsense" },
+            { "name": "Tacos", "prepTimeMinutes": 25, "tags": [], "scheduledSlot": "WED 19:30" }
+          ]
         }
         """
         var service = AIService()
         service._callAPI = { _ in json }
 
-        let result = try await service.suggestNewMeal(
+        let results = try await service.suggestMealOptions(
             existingMeals: [], freeDinnerSlots: [],
             preferences: makePrefs(), referenceWeek: makeWeekContainingWednesday()
         )
 
-        XCTAssertFalse(result.meal.isUserDefined, "AI-suggested meals must have isUserDefined = false")
+        XCTAssertEqual(results.map(\.meal.name), ["Curry", "Tacos"])
     }
 
-    func testSuggestNewMealThrowsOnMalformedJSON() async {
+    func testSuggestMealOptionsThrowsOnMalformedJSON() async {
         var service = AIService()
         service._callAPI = { _ in "not json {{" }
 
         do {
-            _ = try await service.suggestNewMeal(
+            _ = try await service.suggestMealOptions(
                 existingMeals: [], freeDinnerSlots: [],
                 preferences: makePrefs(), referenceWeek: makeWeekContainingWednesday()
             )
@@ -294,25 +310,14 @@ final class AIServiceTests: XCTestCase {
         }
     }
 
-    func testSuggestNewMealThrowsWhenSlotNotInReferenceWeek() async {
-        // The slot says "WED" but we pass an empty reference week → parseSlot returns nil
-        let json = """
-        {
-          "meal": {
-            "name": "Curry",
-            "prepTimeMinutes": 30,
-            "tags": [],
-            "scheduledSlot": "WED 20:00"
-          }
-        }
-        """
+    func testSuggestMealOptionsThrowsWhenNoSlotResolves() async {
         var service = AIService()
-        service._callAPI = { _ in json }
+        service._callAPI = { _ in self.optionsJSON() }
 
         do {
-            _ = try await service.suggestNewMeal(
+            _ = try await service.suggestMealOptions(
                 existingMeals: [], freeDinnerSlots: [],
-                preferences: makePrefs(), referenceWeek: [] // empty → slot not found
+                preferences: makePrefs(), referenceWeek: [] // empty → no slot resolves
             )
             XCTFail("Should have thrown")
         } catch AIServiceError.invalidResponse {
@@ -320,6 +325,29 @@ final class AIServiceTests: XCTestCase {
         } catch {
             XCTFail("Wrong error type: \(error)")
         }
+    }
+
+    // MARK: - Suggestion fetch cap
+
+    func testMealSuggestionCapAllowsTwoPerDay() {
+        let p = makePrefs()
+        XCTAssertTrue(p.canFetchMealSuggestion())
+        p.recordMealSuggestionFetch()
+        XCTAssertTrue(p.canFetchMealSuggestion())
+        p.recordMealSuggestionFetch()
+        XCTAssertFalse(p.canFetchMealSuggestion())
+    }
+
+    func testMealSuggestionCapResetsNextDay() {
+        let p = makePrefs()
+        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: Date())!
+        p.recordMealSuggestionFetch(now: yesterday)
+        p.recordMealSuggestionFetch(now: yesterday)
+        XCTAssertFalse(p.canFetchMealSuggestion(now: yesterday))
+
+        XCTAssertTrue(p.canFetchMealSuggestion())
+        p.recordMealSuggestionFetch()
+        XCTAssertEqual(p.mealSuggestionFetchCount, 1)
     }
 
     // MARK: - moveEvent

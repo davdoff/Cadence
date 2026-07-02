@@ -3,6 +3,7 @@ import SwiftData
 import Charts
 
 struct OverviewView: View {
+    @AppStorage("accentColorHex") private var accentColorHex = "#E8784D"
     @Query(sort: \Event.startTime) private var allEvents: [Event]
     @Query private var habits: [Habit]
 
@@ -129,7 +130,7 @@ struct OverviewView: View {
 
     var body: some View {
         ZStack {
-            Color.cadenceCream.ignoresSafeArea()
+            Color.appBackground(accentColorHex).ignoresSafeArea()
             ScrollView {
                 VStack(spacing: 20) {
                     periodPicker
@@ -157,7 +158,7 @@ struct OverviewView: View {
         }
         .navigationTitle("Overview")
         .navigationBarTitleDisplayMode(.large)
-        .toolbarBackground(Color.cadenceCream, for: .navigationBar)
+        .toolbarBackground(Color.appBackground(accentColorHex), for: .navigationBar)
     }
 
     // MARK: - Period picker
@@ -176,7 +177,7 @@ struct OverviewView: View {
             ZStack {
                 // Background track
                 Circle()
-                    .stroke(Color.cadenceCreamDeep, lineWidth: 18)
+                    .stroke(Color.appDeep(accentColorHex), lineWidth: 18)
                     .frame(width: 170, height: 170)
 
                 // Fill arc
@@ -184,7 +185,7 @@ struct OverviewView: View {
                     .trim(from: 0, to: rate)
                     .stroke(
                         LinearGradient(
-                            colors: [.cadenceOrangeLight, .cadenceOrange, .cadenceOrangeDark],
+                            colors: [.accentLight(accentColorHex), .appAccent(accentColorHex), .accentDark(accentColorHex)],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         ),
@@ -198,7 +199,7 @@ struct OverviewView: View {
                 VStack(spacing: 2) {
                     Text("\(Int(rate * 100))%")
                         .font(.system(size: 42, weight: .bold, design: .rounded))
-                        .foregroundColor(.cadenceOrange)
+                        .foregroundColor(.appAccent(accentColorHex))
                         .contentTransition(.numericText())
                         .animation(.spring(duration: 0.4), value: rate)
                     Text("completed")
@@ -219,7 +220,7 @@ struct OverviewView: View {
                     Text("·").foregroundColor(.secondary)
                     Label("\(perfectDaysThisPeriod) perfect day\(perfectDaysThisPeriod == 1 ? "" : "s")", systemImage: "star.fill")
                         .font(.caption.weight(.semibold))
-                        .foregroundColor(.cadenceOrange)
+                        .foregroundColor(.appAccent(accentColorHex))
                 }
             }
         }
@@ -236,7 +237,7 @@ struct OverviewView: View {
         HStack(spacing: 12) {
             statChip(value: completed, label: "Completed", icon: "checkmark.circle.fill", color: .green)
             statChip(value: missed,    label: "Missed",    icon: "xmark.circle.fill",     color: .red.opacity(0.7))
-            statChip(value: upcoming,  label: "Coming up", icon: "clock.fill",            color: .cadenceOrangeLight)
+            statChip(value: upcoming,  label: "Coming up", icon: "clock.fill",            color: .accentLight(accentColorHex))
         }
     }
 
@@ -274,7 +275,7 @@ struct OverviewView: View {
                     x: .value("Day", day.date, unit: .day),
                     y: .value("Total", day.completed + day.missed)
                 )
-                .foregroundStyle(Color.cadenceCreamDeep)
+                .foregroundStyle(Color.appDeep(accentColorHex))
                 .cornerRadius(4)
 
                 BarMark(
@@ -283,7 +284,7 @@ struct OverviewView: View {
                 )
                 .foregroundStyle(
                     LinearGradient(
-                        colors: [.cadenceOrangeLight, .cadenceOrange],
+                        colors: [.accentLight(accentColorHex), .appAccent(accentColorHex)],
                         startPoint: .bottom,
                         endPoint: .top
                     )
@@ -306,8 +307,8 @@ struct OverviewView: View {
             .frame(height: 120)
 
             HStack(spacing: 16) {
-                legendDot(color: .cadenceOrange,    label: "Completed")
-                legendDot(color: .cadenceCreamDeep, label: "Missed / Total")
+                legendDot(color: .appAccent(accentColorHex),    label: "Completed")
+                legendDot(color: .appDeep(accentColorHex), label: "Missed / Total")
             }
         }
         .padding()
@@ -349,7 +350,7 @@ struct OverviewView: View {
                     GeometryReader { geo in
                         ZStack(alignment: .leading) {
                             RoundedRectangle(cornerRadius: 3)
-                                .fill(Color.cadenceCreamDeep)
+                                .fill(Color.appDeep(accentColorHex))
                             RoundedRectangle(cornerRadius: 3)
                                 .fill(Color(hex: stat.colorHex).opacity(0.8))
                                 .frame(width: geo.size.width * stat.completionRate)
@@ -372,13 +373,13 @@ struct OverviewView: View {
         VStack(alignment: .leading, spacing: 14) {
             Label("Meals", systemImage: "fork.knife")
                 .font(.subheadline.weight(.semibold))
-                .foregroundColor(.cadenceOrange)
+                .foregroundColor(.appAccent(accentColorHex))
 
             HStack(alignment: .top, spacing: 0) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("\(mealsEaten)")
                         .font(.system(size: 36, weight: .bold, design: .rounded))
-                        .foregroundColor(.cadenceOrange)
+                        .foregroundColor(.appAccent(accentColorHex))
                     Text("meal\(mealsEaten == 1 ? "" : "s") eaten")
                         .font(.caption)
                         .foregroundColor(.secondary)
@@ -399,7 +400,7 @@ struct OverviewView: View {
                     VStack(alignment: .trailing, spacing: 4) {
                         Text("\(Int(rate * 100))%")
                             .font(.system(size: 36, weight: .bold, design: .rounded))
-                            .foregroundColor(rate >= 0.7 ? .green : .cadenceOrange)
+                            .foregroundColor(rate >= 0.7 ? .green : .appAccent(accentColorHex))
                         Text("breakfasts")
                             .font(.caption)
                             .foregroundColor(.secondary)
@@ -420,13 +421,13 @@ struct OverviewView: View {
         VStack(alignment: .leading, spacing: 14) {
             Label("Habits Today", systemImage: "chart.bar.fill")
                 .font(.subheadline.weight(.semibold))
-                .foregroundColor(.cadenceOrange)
+                .foregroundColor(.appAccent(accentColorHex))
 
             HStack(alignment: .top, spacing: 0) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("\(totalLoggedToday)")
                         .font(.system(size: 36, weight: .bold, design: .rounded))
-                        .foregroundColor(.cadenceOrange)
+                        .foregroundColor(.appAccent(accentColorHex))
                     Text("good action\(totalLoggedToday == 1 ? "" : "s") logged")
                         .font(.caption)
                         .foregroundColor(.secondary)
@@ -438,11 +439,11 @@ struct OverviewView: View {
                         HStack(alignment: .firstTextBaseline, spacing: 4) {
                             Text("\(best.currentStreak)")
                                 .font(.system(size: 36, weight: .bold, design: .rounded))
-                                .foregroundColor(.cadenceOrange)
+                                .foregroundColor(.appAccent(accentColorHex))
                             Text("days").font(.caption).foregroundColor(.secondary)
                         }
                         HStack(spacing: 3) {
-                            Image(systemName: "flame.fill").foregroundColor(.cadenceOrange)
+                            Image(systemName: "flame.fill").foregroundColor(.appAccent(accentColorHex))
                             Image(systemName: best.symbolName)
                             Text(best.name)
                         }
@@ -469,11 +470,11 @@ struct OverviewView: View {
                             let p = min(Double(habit.count()) / Double(habit.dailyGoal), 1.0)
                             Text("\(habit.count())/\(habit.dailyGoal)")
                                 .font(.caption.weight(.semibold))
-                                .foregroundColor(p >= 1 ? .green : .cadenceOrange)
+                                .foregroundColor(p >= 1 ? .green : .appAccent(accentColorHex))
                         } else {
                             Text("\(habit.count())")
                                 .font(.caption.weight(.semibold))
-                                .foregroundColor(.cadenceOrange)
+                                .foregroundColor(.appAccent(accentColorHex))
                         }
                     }
                 }
@@ -491,7 +492,7 @@ struct OverviewView: View {
         VStack(spacing: 14) {
             Image(systemName: "chart.pie")
                 .font(.system(size: 52))
-                .foregroundColor(.cadenceOrangeLight)
+                .foregroundColor(.accentLight(accentColorHex))
             Text("Nothing to show yet")
                 .font(.headline).foregroundColor(.secondary)
             Text("Add events and habits — your stats will appear here.")
