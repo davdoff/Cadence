@@ -205,6 +205,7 @@ struct HabitsView: View {
                         Divider()
                         Button(role: .destructive) {
                             context.delete(habit); try? context.save()
+                            WidgetSync.refresh()
                         } label: { Label("Delete", systemImage: "trash") }
                     }
             }
@@ -320,6 +321,7 @@ struct HabitCard: View {
             HStack(spacing: compact ? 6 : 8) {
                 Button {
                     withAnimation(.spring(duration: 0.2)) { habit.decrement(); try? context.save() }
+                    WidgetSync.refresh()
                 } label: {
                     Image(systemName: "minus.circle.fill")
                         .font(.system(size: compact ? 24 : 28))
@@ -336,6 +338,7 @@ struct HabitCard: View {
 
                 Button {
                     withAnimation(.spring(duration: 0.2)) { habit.increment(); try? context.save() }
+                    WidgetSync.refresh()
                 } label: {
                     Image(systemName: "plus.circle.fill")
                         .font(.system(size: compact ? 24 : 28))

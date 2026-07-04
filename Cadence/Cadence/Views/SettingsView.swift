@@ -176,6 +176,7 @@ struct SettingsView: View {
         let isSelected = accentColorHex == hex
         return Button {
             withAnimation(.spring(duration: 0.25)) { accentColorHex = hex }
+            WidgetSync.mirrorAccent(hex)
         } label: {
             VStack(spacing: 5) {
                 ZStack {

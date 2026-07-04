@@ -254,6 +254,7 @@ struct AddHabitView: View {
             weeklyGoal: weeklyGoal
         ))
         try? context.save()
+        WidgetSync.refresh()
         dismiss()
     }
 }

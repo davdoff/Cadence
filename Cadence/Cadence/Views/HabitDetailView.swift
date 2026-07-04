@@ -66,6 +66,7 @@ struct HabitDetailView: View {
                 VStack(spacing: 12) {
                     Button {
                         withAnimation(.spring(duration: 0.2)) { habit.increment(); try? context.save() }
+                        WidgetSync.refresh()
                     } label: {
                         Image(systemName: "plus.circle.fill")
                             .font(.system(size: 48))
@@ -73,6 +74,7 @@ struct HabitDetailView: View {
                     }
                     Button {
                         withAnimation(.spring(duration: 0.2)) { habit.decrement(); try? context.save() }
+                        WidgetSync.refresh()
                     } label: {
                         Image(systemName: "minus.circle.fill")
                             .font(.system(size: 48))

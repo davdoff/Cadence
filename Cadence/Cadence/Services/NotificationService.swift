@@ -32,6 +32,26 @@ struct NotificationService {
         return identifier
     }
 
+    /// Fires exactly at event start ("Starting now"). Skipped when reminderMinutes == 0,
+    /// since the reminder itself already fires at start time in that case. Returns the identifier.
+    @discardableResult
+    func scheduleEventStartAlert(for event: Event, reminderMinutes: Int) -> String {
+        let identifier = "event-start-\(event.id.uuidString)"
+        guard reminderMinutes != 0, event.startTime > Date.now else { return identifier }
+
+        let content = UNMutableNotificationContent()
+        content.title = event.title
+        content.body = "Starting now"
+        content.sound = .default
+
+        let comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: event.startTime)
+        let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
+        UNUserNotificationCenter.current().add(
+            UNNotificationRequest(identifier: identifier, content: content, trigger: trigger)
+        )
+        return identifier
+    }
+
     /// Fires at event end time, prompting the user to mark it complete or missed.
     func scheduleMissedEventAlert(for event: Event) {
         let identifier = "event-missed-\(event.id.uuidString)"
@@ -69,10 +89,11 @@ struct NotificationService {
         )
     }
 
-    /// Cancels the reminder, missed-alert, and reschedule nudge for an event.
+    /// Cancels the reminder, start alert, missed-alert, and reschedule nudge for an event.
     func cancelEventNotifications(for event: Event) {
         UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [
             "event-reminder-\(event.id.uuidString)",
+            "event-start-\(event.id.uuidString)",
             "event-missed-\(event.id.uuidString)",
             "event-reschedule-\(event.id.uuidString)"
         ])

@@ -270,9 +270,11 @@ struct AIInputView: View {
             event.notificationIdentifier = svc.scheduleEventReminder(
                 for: event, reminderMinutes: prefs.defaultReminderMinutes
             )
+            svc.scheduleEventStartAlert(for: event, reminderMinutes: prefs.defaultReminderMinutes)
             svc.scheduleMissedEventAlert(for: event)
         }
         try? context.save()
+        WidgetSync.refresh()
         dismiss()
     }
 

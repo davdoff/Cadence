@@ -450,6 +450,7 @@ struct WeeklyMealsView: View {
         context.insert(event)
         p.lastNewMealSuggestedDate = Date()
         try? context.save()
+        WidgetSync.refresh()
         showingSuggestionSheet = false
     }
 
@@ -478,6 +479,7 @@ struct WeeklyMealsView: View {
         event.notificationIdentifier = notifications
             .scheduleMealNotification(for: event, reminderMinutes: p.defaultReminderMinutes)
         try? context.save()
+        WidgetSync.refresh()
     }
 
     // MARK: - Daily pass
@@ -501,5 +503,6 @@ struct WeeklyMealsView: View {
             context.insert(event)
         }
         try? context.save()
+        WidgetSync.refresh()
     }
 }

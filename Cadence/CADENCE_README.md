@@ -187,7 +187,7 @@ On event edit or deletion, cancel and reschedule the associated notification —
 
 ### 6.7 Widget Integration
 
-After any meal scheduling pass, write the nearest upcoming meal event to `ScheduleWidgetData.nextMeal` (already defined in the widget data model). Call `WidgetCenter.shared.reloadAllTimelines()` after writing. No additional widget work needed — the **Next Meal** small widget reads from this field directly.
+Widgets read the shared App Group SwiftData store directly (see section 9) — there is no snapshot to write. After any save that changes meal events, call `WidgetSync.refresh()` so the **Next Meal** widget's timeline reloads and re-queries the store.
 
 ---
 
@@ -221,7 +221,7 @@ struct MealSchedulerService {
 }
 ```
 
-`MealPlanningCoordinator` (`@MainActor`) orchestrates the daily pass: stale future-meal cleanup → breakfast → dinner → notification wiring → widget update. It returns a `DailyPassResult` (`newEvents`, `eventsToDelete`) for the caller to persist. AI suggestions are **not** part of the pass — they're user-triggered from the Meals screen. The daily fetch-cap helpers (`canFetchMealSuggestion(now:)` / `recordMealSuggestionFetch(now:)`) live on `UserPreferences`.
+`MealPlanningCoordinator` (`@MainActor`) orchestrates the daily pass: stale future-meal cleanup → breakfast → dinner → notification wiring. It returns a `DailyPassResult` (`newEvents`, `eventsToDelete`) for the caller to persist (the caller also calls `WidgetSync.refresh()` after saving). AI suggestions are **not** part of the pass — they're user-triggered from the Meals screen. The daily fetch-cap helpers (`canFetchMealSuggestion(now:)` / `recordMealSuggestionFetch(now:)`) live on `UserPreferences`.
 
 ---
 
@@ -240,6 +240,7 @@ struct MealSchedulerService {
 
 ### 8. Push Notifications
 - **Event reminders** — notify the user ahead of upcoming events (configurable lead time, e.g. 10 / 30 / 60 minutes before)
+- **Event start alerts** — a second notification exactly at event start ("Starting now"), skipped when the lead time is 0 since the reminder already fires at start (`scheduleEventStartAlert`, identifier `event-start-<id>`)
 - **Missed event alerts** — notify when an event's end time passes without being marked complete
 - **Meal reminders** — prompt the user when a scheduled meal time is approaching
 - **Rescheduling nudges** — notify the user if they have unresolved missed events older than a configurable threshold
@@ -249,33 +250,31 @@ struct MealSchedulerService {
 - On event edit or deletion, always cancel and reschedule the associated notification to keep them in sync
 
 ### 9. Lock Screen & Home Screen Widgets
-- Built with **WidgetKit** as a separate app extension target in the same Xcode project
-- Widgets read from a shared `AppGroup` container (UserDefaults or SwiftData store shared between app and extension)
+- Built with **WidgetKit** in the `CadenceWidget` app extension target
+- The SwiftData store lives in the App Group container (`group.com.david.Cadence`, file `Cadence.store` — see `Models/Shared/AppGroup.swift` / `SharedModelContainer.swift`); widget timeline providers query it directly via `CadenceWidget/WidgetDataStore.swift` (value snapshots only, never `@Model` objects in entries). `SharedModelContainer.migrateLegacyStoreIfNeeded()` copies the pre-App-Group store across once, from the app process.
 - **Never call the Claude API from a widget** — widgets must be fully local and fast
 
-#### Widget Types (planned)
+#### Widget Types (implemented)
 
-| Widget | Size | Content |
-|--------|------|---------|
-| Next Event | Small | Title, time, category colour |
-| Today's Schedule | Medium | List of remaining events for today |
-| Daily Progress | Small | Completed vs total events (ring or bar) |
-| Next Meal | Small | Upcoming meal name and time |
+| Widget | Kind | Families | Content |
+|--------|------|----------|---------|
+| Next Events | `NextEvents` | Small + rectangular accessory | Next 2 events (small); next event only (lock screen) |
+| Today's Schedule | `TodaySchedule` | Medium | Day name + completed/total ring, next 3 events |
+| Daily Progress | `DailyProgress` | Small + circular accessory | Completed vs total events ring |
+| Next Meal | `NextMeal` | Small | Upcoming meal name and time |
+| Habit Goal | `Habit` | Small + circular accessory | One configurable habit: daily ring, weekly line, interactive + button |
+| Habit Grid | `HabitGrid` | Small | Up to 4 configurable habits, mini rings with + buttons |
 
-#### Lock Screen Widgets (iOS 16+)
-- Circular and rectangular accessory sizes
-- Show: next event title + time, or daily completion count
-- Keep data refresh lightweight — use `TimelineProvider` with sensible reload policy (e.g. reload at the start of each event or at midnight)
-
-#### Home Screen Widgets
-- Small, medium, and (optionally) large sizes
-- Tapping a widget deep-links into the relevant section of the app using URL schemes or `widgetURL(_:)`
+#### Interactivity & configuration
+- Habit widgets are configured via `AppIntentConfiguration` (`SelectHabitIntent` / `SelectHabitsIntent`, backed by `HabitEntity`); only good habits are offered
+- `IncrementHabitIntent` runs in the widget process: fetches the habit from the shared store, `increment()`, save, `reloadAllTimelines()`
 
 #### Implementation Notes
-- Create an `AppGroup` entitlement (`group.com.yourname.smartscheduler`) and enable it on both the main app target and the widget extension target
-- Use a shared `ScheduleWidgetData` struct (Codable) written by the main app and read by the widget — keep it minimal (next 3–5 events max)
-- Refresh widget timelines from the main app whenever the schedule changes using `WidgetCenter.shared.reloadAllTimelines()`
-- Do not attempt to display live AI-generated content in widgets — show only cached, locally stored data
+- App Group entitlement `group.com.david.Cadence` on both targets
+- The app calls `WidgetSync.refresh()` (→ `WidgetCenter.shared.reloadAllTimelines()`) after every save that changes events, habits, meals, or category colours, and `WidgetSync.mirrorAccent(_:)` on launch and theme change (the widget process can't read the app's standard UserDefaults, so the accent hex is mirrored into App Group defaults; widgets theme via `WidgetTheme` + the `Color.app*` helpers)
+- Schedule widgets share `ScheduleProvider`: one timeline entry now plus one at each remaining event's start/end (cap 12), reload policy `.after(midnight)`; habit widgets use a single entry and rely on explicit reloads
+- Tapping a widget deep-links via `widgetURL` — scheme `cadence://` (`today`, `meals` → Schedule, `habits`), handled in `ContentView.onOpenURL`
+- Do not attempt to display live AI-generated content in widgets — show only local data
 
 ### 10. Habit Tracking
 - User defines habits, each tagged as either a **good habit** (something to do more of) or a **bad habit** (something to reduce)
@@ -528,10 +527,10 @@ A GitHub issue exists requesting Claude Code ↔ Claude.ai Projects integration,
 - [ ] Deep project planner (intake form + Claude breakdown + event scheduling)
 - [ ] Push notification service built (local scheduling via UNUserNotificationCenter)
 - [ ] Notification preferences added to UserPreferences
-- [ ] AppGroup entitlement configured on app + widget targets
-- [ ] WidgetKit extension created with at least Small and Medium home screen widgets
-- [ ] Lock screen widgets implemented (iOS 16+)
-- [ ] Widget timeline refresh wired to schedule changes
+- [x] AppGroup entitlement configured on app + widget targets (`group.com.david.Cadence`)
+- [x] WidgetKit extension created with Small and Medium home screen widgets (6 widgets incl. interactive habit logging)
+- [x] Lock screen widgets implemented (circular + rectangular accessories)
+- [x] Widget timeline refresh wired to schedule changes (`WidgetSync.refresh()` after every relevant save)
 
 ### Phase 2 — Pre-Release
 - [ ] Apple Developer account active ($99/year)
@@ -623,18 +622,18 @@ ProjectPhase
 - targetDate: Date
 - linkedEventIDs: [UUID]
 
-// Shared with Widget Extension (written to AppGroup UserDefaults)
-ScheduleWidgetData (Codable)
-- lastUpdated: Date
-- upcomingEvents: [WidgetEvent] // max 5, lightweight struct
-- todayCompleted: Int
-- todayTotal: Int
-- nextMeal: WidgetEvent?
-
-WidgetEvent (Codable)
+// Widget extension (reads the shared App Group SwiftData store directly;
+// value snapshots built per timeline entry in CadenceWidget/WidgetDataStore.swift)
+EventSnapshot
+- id: UUID
 - title: String
-- startTime: Date
-- categoryColorHex: String
+- startTime / endTime: Date
+- colorHex: String
+
+HabitSnapshot
+- id: UUID
+- name / symbolName / colorHex: String
+- todayCount / dailyGoal / weekCount / weeklyGoal: Int
 ```
 
 ---

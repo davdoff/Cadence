@@ -262,5 +262,6 @@ struct ScheduleView: View {
         NotificationService().cancelEventNotifications(for: event)
         context.delete(event)
         try? context.save()
+        WidgetSync.refresh()
     }
 }

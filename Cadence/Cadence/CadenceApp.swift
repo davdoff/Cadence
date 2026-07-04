@@ -4,28 +4,8 @@ import SwiftData
 @main
 struct CadenceApp: App {
     let container: ModelContainer = {
-        let schema = Schema([
-            Event.self,
-            Category.self,
-            Meal.self,
-            UserPreferences.self,
-            Habit.self
-        ])
-        do {
-            return try ModelContainer(for: schema)
-        } catch {
-            // Schema changed on disk — wipe the store and start fresh.
-            let appSupport = FileManager.default.urls(
-                for: .applicationSupportDirectory, in: .userDomainMask
-            ).first!
-            let storeFiles = (try? FileManager.default.contentsOfDirectory(
-                at: appSupport, includingPropertiesForKeys: nil
-            )) ?? []
-            for file in storeFiles where file.lastPathComponent.contains("default") {
-                try? FileManager.default.removeItem(at: file)
-            }
-            return try! ModelContainer(for: schema)
-        }
+        SharedModelContainer.migrateLegacyStoreIfNeeded()
+        return SharedModelContainer.make()
     }()
 
     var body: some Scene {
@@ -33,6 +13,9 @@ struct CadenceApp: App {
             ContentView()
                 .task {
                     NotificationService.requestAuthorization()
+                    WidgetSync.mirrorAccent(
+                        UserDefaults.standard.string(forKey: "accentColorHex") ?? "#E8784D"
+                    )
                     await seedIfNeeded()
                 }
         }

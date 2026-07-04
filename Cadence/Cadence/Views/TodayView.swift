@@ -284,6 +284,7 @@ struct TodayView: View {
             svc.scheduleReschedulingNudge(for: event, after: 2)
         }
         try? context.save()
+        WidgetSync.refresh()
     }
 
     private var greeting: String {

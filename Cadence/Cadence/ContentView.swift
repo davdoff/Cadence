@@ -2,6 +2,10 @@ import SwiftUI
 import SwiftData
 
 struct ContentView: View {
+    private enum Tab: Hashable {
+        case today, schedule, habits, overview, settings
+    }
+
     @AppStorage("accentColorHex") private var accentColorHex = "#E8784D"
     @AppStorage("lastMealPassDay") private var lastMealPassDay = ""
 
@@ -12,22 +16,29 @@ struct ContentView: View {
     @Query private var prefsResults: [UserPreferences]
     @Query private var categories: [Category]
 
+    @State private var selectedTab: Tab = .today
+
     var body: some View {
-        TabView {
+        TabView(selection: $selectedTab) {
             NavigationStack { TodayView() }
                 .tabItem { Label("Today",    systemImage: "clock.fill")           }
+                .tag(Tab.today)
 
             NavigationStack { ScheduleView() }
                 .tabItem { Label("Schedule", systemImage: "calendar")             }
+                .tag(Tab.schedule)
 
             NavigationStack { HabitsView() }
                 .tabItem { Label("Habits",   systemImage: "bolt.heart.fill")      }
+                .tag(Tab.habits)
 
             NavigationStack { OverviewView() }
                 .tabItem { Label("Overview", systemImage: "chart.xyaxis.line")    }
+                .tag(Tab.overview)
 
             NavigationStack { SettingsView() }
                 .tabItem { Label("Settings", systemImage: "slider.horizontal.3")  }
+                .tag(Tab.settings)
         }
         .tint(Color(hex: accentColorHex))
         .preferredColorScheme(.light)
@@ -37,6 +48,15 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 Task { await runDailyMealPassIfNeeded() }
+            }
+        }
+        .onOpenURL { url in
+            guard url.scheme == "cadence" else { return }
+            switch url.host() {
+            case "today":              selectedTab = .today
+            case "schedule", "meals":  selectedTab = .schedule
+            case "habits":             selectedTab = .habits
+            default:                   break
             }
         }
     }
@@ -61,6 +81,7 @@ struct ContentView: View {
         for event in result.eventsToDelete { context.delete(event) }
         for event in result.newEvents { context.insert(event) }
         try? context.save()
+        WidgetSync.refresh()
         lastMealPassDay = todayKey
     }
 }

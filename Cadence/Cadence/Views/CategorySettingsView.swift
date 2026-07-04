@@ -24,6 +24,7 @@ struct CategorySettingsView: View {
                 .onDelete { offsets in
                     for i in offsets { context.delete(categories[i]) }
                     try? context.save()
+                    WidgetSync.refresh()
                 }
             }
             .listStyle(.insetGrouped)
@@ -257,6 +258,7 @@ struct EditCategoryView: View {
         category.name     = name.trimmingCharacters(in: .whitespaces)
         category.colorHex = selectedColor
         try? context.save()
+        WidgetSync.refresh()
         dismiss()
     }
 }

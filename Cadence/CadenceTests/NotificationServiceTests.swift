@@ -107,6 +107,24 @@ final class NotificationServiceTests: XCTestCase {
         XCTAssertEqual(identifier, "event-reminder-\(event.id.uuidString)")
     }
 
+    func testEventStartAlertIdentifierFollowsPattern() {
+        // Past event: the guard fires early, but the identifier keeps its format.
+        let past = Date().addingTimeInterval(-7200)
+        let event = Event(title: "Old Meeting", startTime: past, endTime: past.addingTimeInterval(3600))
+        context.insert(event)
+
+        let identifier = service.scheduleEventStartAlert(for: event, reminderMinutes: 15)
+        XCTAssertEqual(identifier, "event-start-\(event.id.uuidString)")
+    }
+
+    func testEventStartAlertZeroReminderStillReturnsIdentifier() {
+        // reminderMinutes == 0 → skipped (the reminder already fires at start),
+        // but the identifier is still returned for cancellation symmetry.
+        let event = makeEvent()
+        let identifier = service.scheduleEventStartAlert(for: event, reminderMinutes: 0)
+        XCTAssertEqual(identifier, "event-start-\(event.id.uuidString)")
+    }
+
     func testMealNotificationIdentifierFollowsPattern() {
         let past = Date().addingTimeInterval(-7200)
         let event = Event(title: "Dinner", startTime: past, endTime: past.addingTimeInterval(3600))

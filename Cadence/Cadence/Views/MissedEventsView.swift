@@ -63,6 +63,7 @@ struct MissedEventsView: View {
                         Button(role: .destructive) {
                             context.delete(event)
                             try? context.save()
+                            WidgetSync.refresh()
                         } label: {
                             Label("Delete", systemImage: "trash")
                         }
@@ -79,6 +80,7 @@ struct MissedEventsView: View {
         rescheduleTitle = event.title
         context.delete(event)
         try? context.save()
+        WidgetSync.refresh()
         showingReschedule = true
     }
 }

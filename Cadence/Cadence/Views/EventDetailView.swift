@@ -140,6 +140,7 @@ struct EventDetailView: View {
             svc.scheduleReschedulingNudge(for: event, after: 2)
         }
         try? context.save()
+        WidgetSync.refresh()
     }
 
     // MARK: - Helpers

@@ -1,9 +1,8 @@
 import Foundation
-import WidgetKit
 
 /// Orchestrates the daily meal scheduling pass for today only:
 /// stale future-meal cleanup → breakfast scheduling → dinner scheduling →
-/// notification wiring → widget update. AI meal suggestions are user-triggered
+/// notification wiring. AI meal suggestions are user-triggered
 /// from WeeklyMealsView, not part of this pass.
 ///
 /// Meals are planned at day start rather than a week ahead, so they never
@@ -89,25 +88,6 @@ final class MealPlanningCoordinator {
             event.notificationIdentifier = identifier
         }
         newEvents.append(contentsOf: dinnerEvents)
-
-        // 3. Widget — nearest upcoming meal
-        let allMealEvents = remainingEvents + newEvents
-        if let nearest = mealScheduler.nearestUpcomingMeal(from: allMealEvents) {
-            var widgetData = ScheduleWidgetData.load() ?? ScheduleWidgetData(
-                lastUpdated: Date(),
-                upcomingEvents: [],
-                todayCompleted: 0,
-                todayTotal: 0,
-                nextMeal: nil
-            )
-            widgetData.nextMeal = WidgetEvent(
-                title: nearest.title,
-                startTime: nearest.startTime,
-                categoryColorHex: nearest.category?.colorHex ?? "#F0AD4E"
-            )
-            widgetData.save()
-            WidgetCenter.shared.reloadAllTimelines()
-        }
 
         return DailyPassResult(
             newEvents: newEvents,
