@@ -112,9 +112,12 @@ function createV1Router({ callClaude }) {
       end: parseISO(req.body.period.end, c.zone, "period.end"),
     };
     if (period.end <= period.start) throw badRequest('"period.end" must be after "period.start"');
+    // A period starting earlier today must not offer already-past slots.
+    const windowStart = period.start < c.now ? c.now : period.start;
+    if (period.end <= windowStart) throw badRequest('"period" is entirely in the past');
     const freeSlots = scheduler.freeSlots({
       durationMinutes: 30,
-      windowStart: period.start,
+      windowStart,
       windowEnd: period.end,
       events: c.events,
       prefs: c.prefs,
@@ -134,7 +137,10 @@ function createV1Router({ callClaude }) {
       if (typeof m?.name !== "string") throw badRequest(`"existingMeals[${i}].name" is required`);
       return { name: m.name, prepTimeMinutes: Number.isInteger(m.prepTimeMinutes) ? m.prepTimeMinutes : 30 };
     });
-    const dinnerSlots = scheduler.dinnerSlots({ now: c.now, events: c.events, prefs: c.prefs });
+    // Meals are planned during the day, not a week ahead (client design decision)
+    // — default to today only; clients may widen up to 7 days.
+    const days = Number.isInteger(req.body.days) ? Math.min(Math.max(req.body.days, 1), 7) : 1;
+    const dinnerSlots = scheduler.dinnerSlots({ now: c.now, days, events: c.events, prefs: c.prefs });
     if (dinnerSlots.length === 0) return res.json({ suggestions: [] }); // nothing to schedule into — no AI call
     const payload = build.buildMealSuggestion({ now: c.now, meals, slots: dinnerSlots, prefs: c.prefs });
     const result = await callAndParse(callClaude, { system: prompts.mealSuggestion, payload },

@@ -163,6 +163,10 @@ struct EventDetailView: View {
             Label("Missed", systemImage: "exclamationmark.circle.fill")
                 .foregroundColor(.red)
                 .fontWeight(.semibold)
+        case .displaced:
+            Label("Needs rescheduling", systemImage: "arrow.uturn.right.circle.fill")
+                .foregroundColor(.orange)
+                .fontWeight(.semibold)
         case .pending:
             Label("Upcoming", systemImage: "clock.fill")
                 .foregroundColor(Color(hex: accentColorHex))

@@ -1,7 +1,10 @@
 import Foundation
 
 enum EventStatus: String, Codable {
-    case pending, completed, missed
+    // Shared with the widget target — append new cases only, never reorder.
+    // .displaced = "the planner moved this aside, needs rescheduling" — NOT a
+    // failure; excluded from missed/completion stats (ai-planner.md §6).
+    case pending, completed, missed, displaced
 }
 
 enum HabitType: String, Codable {

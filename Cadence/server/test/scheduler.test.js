@@ -94,6 +94,16 @@ test("free slots span multiple days", () => {
   assert.equal(slots.length, 2);
 });
 
+test("slots before windowStart are clipped; straddling slot starts there", () => {
+  // windowStart mid-afternoon: the 9–18 workday must not yield morning slots.
+  const slots = scheduler.freeSlots({
+    durationMinutes: 60, windowStart: at(14, 30), windowEnd: at(14, 30), events: [], prefs,
+  });
+  assert.equal(slots.length, 1);
+  assert.equal(slots[0].start.toISO(), at(14, 30).toISO());
+  assert.equal(slots[0].end.hour, 18);
+});
+
 test("avoid-scheduling block respected on matching ISO weekday", () => {
   // Monday = ISO weekday 1; block Monday lunch
   const withAvoid = { ...prefs, avoidScheduling: [{ weekdays: [1], start: "12:00", end: "13:00" }] };
@@ -117,13 +127,28 @@ test("compact schedule shows events with tokens and free tail, maps ids", () => 
   assert.equal(idMap.E1, event.id);
 });
 
-test("compact schedule: missed event skipped, empty day fully free", () => {
+test("compact schedule: missed event occupies no time but stays targetable", () => {
   const missed = makeEvent(at(10), at(11), "missed");
   const { text, idMap } = scheduler.compactScheduleWithIds({
     events: [missed], windowStart: MONDAY, windowEnd: MONDAY, prefs,
   });
-  assert.match(text, /MON FREE:09:00-18:00/);
-  assert.equal(Object.keys(idMap).length, 0);
+  assert.match(text, /MON FREE:09:00-18:00/);                  // day reads as free
+  assert.match(text, /NEEDS_RESCHEDULING: 'Test'\[Work\]\(E1\)/); // but reschedule can point at it
+  assert.equal(idMap.E1, missed.id);
+});
+
+test("displaced event: no free-slot blocking, listed for rescheduling", () => {
+  const displaced = makeEvent(at(10), at(11), "displaced");
+  const slots = scheduler.freeSlots({
+    durationMinutes: 60, windowStart: MONDAY, windowEnd: MONDAY, events: [displaced], prefs,
+  });
+  assert.equal(slots.length, 1); // stale times don't block the day
+
+  const { text, idMap } = scheduler.compactScheduleWithIds({
+    events: [displaced], windowStart: MONDAY, windowEnd: MONDAY, prefs,
+  });
+  assert.match(text, /NEEDS_RESCHEDULING: 'Test'\[Work\]\(E1\)/);
+  assert.equal(idMap.E1, displaced.id);
 });
 
 // ── Dinner slots ────────────────────────────────────────────────────────────

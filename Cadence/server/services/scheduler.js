@@ -13,7 +13,9 @@
 
 const { parseHHMM, dayAbbr, hhmm } = require("../lib/time");
 
-const notMissed = (e) => e.status !== "missed";
+// Missed and displaced events no longer occupy time — both are awaiting a new
+// slot (displaced = "the planner moved this aside", ai-planner.md §6).
+const occupiesTime = (e) => e.status !== "missed" && e.status !== "displaced";
 const sameDay = (dt, day) => dt.hasSame(day, "day");
 
 /** Sorted-interval merge — mirror of SchedulerService.merge. */
@@ -32,10 +34,10 @@ function mergeIntervals(intervals) {
 }
 
 /** Every event overlapping the proposal, buffer respected on both sides.
- *  Missed events are ignored — they no longer occupy time. */
+ *  Missed/displaced events are ignored — they no longer occupy time. */
 function conflicts(proposal, events, bufferMinutes) {
   return events.filter((event) => {
-    if (!notMissed(event)) return false;
+    if (!occupiesTime(event)) return false;
     const start = event.start.minus({ minutes: bufferMinutes });
     const end = event.end.plus({ minutes: bufferMinutes });
     return start < proposal.end && proposal.start < end;
@@ -61,7 +63,7 @@ function freeSlots({ durationMinutes, windowStart, windowEnd, events, prefs }) {
 
     // Events block start → end + buffer
     for (const event of events) {
-      if (notMissed(event) && sameDay(event.start, day)) {
+      if (occupiesTime(event) && sameDay(event.start, day)) {
         blocked.push({ start: event.start, end: event.end.plus({ minutes: prefs.bufferMinutes }) });
       }
     }
@@ -98,7 +100,12 @@ function freeSlots({ durationMinutes, windowStart, windowEnd, events, prefs }) {
     day = day.plus({ days: 1 });
   }
 
-  return result;
+  // Slots before windowStart are gone; a straddling slot starts at
+  // windowStart (same rule as dinnerSlots — callers pass `now` or a
+  // period start, and the past must never be offered to the model).
+  return result
+    .map((s) => ({ start: s.start > windowStart ? s.start : windowStart, end: s.end }))
+    .filter((s) => s.end.diff(s.start).toMillis() >= requiredMs);
 }
 
 /**
@@ -118,7 +125,7 @@ function dinnerSlots({ now, days = 7, events, prefs }) {
     const windowEnd = day.set({ hour: winEnd.hour, minute: winEnd.minute, second: 0, millisecond: 0 });
 
     const blocked = events
-      .filter((e) => notMissed(e) && e.start < windowEnd && windowStart < e.end.plus({ minutes: prefs.bufferMinutes }))
+      .filter((e) => occupiesTime(e) && e.start < windowEnd && windowStart < e.end.plus({ minutes: prefs.bufferMinutes }))
       .map((e) => ({ start: e.start, end: e.end.plus({ minutes: prefs.bufferMinutes }) }))
       .sort((a, b) => a.start - b.start);
 
@@ -162,7 +169,7 @@ function compactScheduleWithIds({ events, windowStart, windowEnd, prefs }) {
     const abbr = dayAbbr(day);
 
     const dayEvents = events
-      .filter((e) => notMissed(e) && sameDay(e.start, day))
+      .filter((e) => occupiesTime(e) && sameDay(e.start, day))
       .sort((a, b) => a.start - b.start);
 
     if (dayEvents.length === 0) {
@@ -181,6 +188,18 @@ function compactScheduleWithIds({ events, windowStart, windowEnd, prefs }) {
     }
 
     day = day.plus({ days: 1 });
+  }
+
+  // Missed/displaced events occupy no time but must stay targetable — they're
+  // exactly what the "reschedule" intent points at (ai-planner.md §4, §6).
+  const needsReschedule = events.filter((e) => e.status === "missed" || e.status === "displaced");
+  if (needsReschedule.length > 0) {
+    const parts = needsReschedule.map((e) => {
+      const token = `E${nextToken++}`;
+      idMap[token] = e.id;
+      return `'${e.title}'[${e.category ?? "—"}](${token})`;
+    });
+    lines.push(`NEEDS_RESCHEDULING: ${parts.join(" ")}`);
   }
 
   return { text: lines.join("\n"), idMap };

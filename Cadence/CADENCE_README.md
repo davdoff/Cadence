@@ -300,26 +300,129 @@ After v1, add an optional **multi-turn intake flow** where Claude asks the user 
 
 ---
 
-## AI Request Architecture — Scheduling Intent Model
+## AI Request Architecture — /v1 Planning API (Implemented)
 
-Different scheduling intents require structurally different context sent to Claude. The app uses a `SchedulingContextBuilder` service that selects the right data shape per intent before making any API call.
+The AI "brain" lives entirely **server-side**. The Node/Express backend (the
+`server/` directory, run via `server/index.js`) owns the system prompts,
+context/prompt building, free-slot computation, Claude calls, and response
+parsing (with a **retry-once rule** on unparseable model output). The iOS
+client only exchanges **typed JSON DTOs** — it never sees a prompt or raw
+model output. Design docs: `BACKEND_PLAN.md` (migration + contract) and
+`ai-planner.md` (planner contract, intents, UX rules).
 
-### Proxy Server (Implemented)
+### Backend layout (`server/`)
 
-The app **never calls the Claude API directly**. All calls go through a local Node/Express proxy (`server.js`, gitignored) that holds the API key. `AIService.proxyBaseURL` points at the proxy — during development it's an ngrok URL that must be updated whenever ngrok restarts. The app POSTs `{ systemPrompt, userPayload }` and the proxy returns the raw Claude response envelope.
+```
+server/
+  index.js            # entry point: reads ANTHROPIC_API_KEY, starts the app
+  app.js              # Express app factory; callClaude is injectable for tests
+  routes/v1.js        # all /v1 endpoints (validate → slots → prompt → parse)
+  routes/legacy.js    # old /api/* passthrough for the shipped build (delete later)
+  prompts/index.js    # all system prompts (scheduling, interpret, generate, …)
+  services/
+    scheduler.js      # free-slot finding, dinner slots, compact schedule + id map
+    contextBuilder.js # per-intent payload builders (port of the old Swift builder)
+    parsers.js        # Claude-response → typed JSON parsers
+    expander.js       # shared goals/phases → concrete-events expander
+  lib/                # claude call + retry-once, DTO validation, errors, time
+  test/               # routes / scheduler / parsers tests (fake Claude, no network)
+```
 
-| Route | Purpose | System prompt |
+The server is **stateless and OS-blind**: every request carries `now` +
+`timezone` from the device, all times are ISO8601 with the device UTC offset
+(never `Z`), and the device stays the source of truth for data.
+
+### Routes
+
+| Route | Purpose |
+|---|---|
+| `GET /v1/health` | Health check |
+| `POST /v1/schedule/interpret` | **The "Ask AI" secretary box** — classifies free text into an intent and returns a typed decision (see below) |
+| `POST /v1/schedule/add` | Add event from natural language → scheduling decision |
+| `POST /v1/schedule/move` | Move an existing event → decision + alternatives |
+| `POST /v1/schedule/reschedule` | Reschedule a missed event into a free slot |
+| `POST /v1/schedule/generate` | Fill a period with events for stated goals (uses the shared expander) |
+| `POST /v1/meal/suggestions` | New-meal options fitted to dinner slots (returns `[]` without an AI call when no slots exist) |
+| `POST /v1/habits/analysis` | Weekly habit insight (plain text) |
+| `POST /v1/project/plan` | Deep project phase breakdown |
+
+The old `/api/*` passthrough routes stay mounted (only when an API key is
+present) so the currently shipped iOS build keeps working during migration.
+Errors use a uniform `{ error: { code, message } }` envelope, surfaced in
+Swift as `AIServiceError.serverError`.
+
+### The AI planner — `/v1/schedule/interpret`
+
+The single endpoint behind the natural-language box (`AIInputView`). One
+Claude call both classifies the intent and produces the decision — a
+discriminated union on `intent`, always with a human-readable
+`interpretation` string that is shown before anything is committed:
+
+| Intent | Meaning | Client applies as |
 |---|---|---|
-| `POST /api/schedule/add` | Add event from natural language | `systemPrompt` |
-| `POST /api/schedule/move` | Move an existing event | `systemPrompt` |
-| `POST /api/schedule/reschedule` | Reschedule a missed event | `systemPrompt` |
-| `POST /api/meal/suggestion` | 3 new-meal options | `mealSuggestionSystemPrompt` |
-| `POST /api/habit/analysis` | Weekly habit insight (plain text) | `habitSystemPrompt` |
-| `POST /api/project/plan` | Deep project phase breakdown | `projectPlanSystemPrompt` |
+| `add` | New event (incl. conflict / suggest-alternative sub-states) | insert `Event(source: .ai)` |
+| `move` | Move an existing event (targeted by stable id) | reschedule that event |
+| `reschedule` | Re-slot a missed/displaced event | move it to the returned slot |
+| `reorganize` | Multi-event cleanup: `moves` + `displaced` ids | apply moves; mark displaced |
+| `generate` | Batch of generated events for a goal | insert the batch |
+| `clarify` | Ambiguous request — question + options | show question card; answer feeds back into a new interpret call |
 
-`AIService` has a `_callAPI` closure hook that tests use to stub responses without hitting the proxy.
+Key rules (from `ai-planner.md`):
+
+- **Server computes free slots** from the event snapshots + prefs; it also
+  builds a compact schedule string with a **stable id map** so `move` /
+  `reschedule` / `reorganize` can point at specific events.
+- **Clarify over guessing** — when the target event or time is ambiguous, the
+  prompt is hardened to return `clarify` instead of a wrong mutation.
+- **Always-confirm** — every mutating intent renders a preview card in
+  `AIInputView` (add/conflict/suggest, move/reschedule, reorganize plan,
+  generate list) and nothing is written until the user confirms. The box also
+  shows a helper line + tappable example chips to teach its range.
+- **`EventStatus.displaced`** — reorganize may set events aside; they get
+  status `.displaced`, surface in a **"Needs rescheduling" tray** inside
+  `MissedEventsView`, and are **excluded from missed/completion stats**
+  (`OverviewView`) — "the planner moved this aside" is not "you failed it".
+
+### Plan a period — direct generate (`/v1/schedule/generate`)
+
+Besides the generate *intent* (reachable through free text in the box, capped
+at interpret's 7-day window), there is a structured entry: the **"Plan a
+period…" button** in `AIInputView` opens **`GeneratePlanSheet`** — quick-range
+chips (Today / This week / Next 7 days / Next week), start/end date pickers,
+and a goals field. It calls `AIService.generate(periodStart:periodEnd:goals:…)`
+→ `POST /v1/schedule/generate`, and hands the returned drafts to the same
+generate confirm card — nothing is inserted without the user's confirm.
+
+Config layering (ai-planner.md §7): standing truths (work hours, buffers,
+avoid-blocks, priority categories, AI level) ride along automatically in
+`PrefsSnapshotDTO`; the sheet only asks for the momentary intent (period +
+goals). There is deliberately **no generation settings screen** — the density
+dial is the existing `aiAggressiveness` slider, which the generate prompt
+reads as `AILevel` (passive = plan lightly, aggressive = fill the free slots).
+The server clips the slot window to `now` so a period starting today never
+offers already-past slots (`scheduler.freeSlots` drops anything before its
+`windowStart`, same rule as `dinnerSlots`).
+
+### Client side (thin by design)
+
+`AIService` is a plain struct that encodes snapshots (`EventSnapshotDTO`,
+`PrefsSnapshotDTO`) and decodes typed decisions (`AssistantDecision`,
+`SchedulingDecision`, `EventDraft`, `MealSuggestionResult`,
+`ProjectPhaseData`). It never imports SwiftUI, touches SwiftData, schedules
+notifications, or calls `WidgetSync` — views apply the returned values. The
+old client-side `SchedulingContextBuilder.swift` and
+`AIService+SystemPrompt.swift` were **deleted**; their logic now lives in
+`server/services/` and `server/prompts/`. A `_callAPI` closure hook lets
+tests exercise encode/decode without the network. `AIService.proxyBaseURL`
+points at the proxy — during development it's an ngrok URL that must be
+updated whenever ngrok restarts.
 
 ### Intent Types and Their Context Shape
+
+The per-intent context shapes below are unchanged in spirit, but they are now
+**built by the server** (`server/services/contextBuilder.js`) from the
+snapshots in the request — the client no longer precomputes slots or formats
+any of this.
 
 **Intent: Add to free slot**
 The user wants to place something new. Claude only needs to know where gaps are — not what fills them.
@@ -365,20 +468,13 @@ WEEKLY_HOURS: 10
 CONSTRAINTS: "Weekends only, no Swift experience needed for UI layer"
 ```
 
-### SchedulingContextBuilder (Swift)
+### Context builders (server-side)
 
-```swift
-enum SchedulingIntent {
-    case mealSuggestion(existingMeals: [Meal], freeDinnerSlots: [TimeSlot])
-    case addToFreeSlot(description: String, freeSlots: [TimeSlot])
-    case moveEvent(event: Event, reason: String, surroundingEvents: [Event], freeSlots: [TimeSlot])
-    case rescheduleMissed(event: Event, missedCount: Int, freeSlots: [TimeSlot])
-    case habitWeeklyAnalysis(habits: [HabitWeekSummary])
-    case deepProjectPlan(goal: String, deadline: Date, weeklyHours: Int, constraints: String)
-}
-```
-
-Each case calls a dedicated builder method that runs entirely locally before the API call. Claude receives exactly the context it needs — nothing more.
+Each route has a dedicated builder in `server/services/contextBuilder.js`
+(add / move / reschedule / interpret / meal suggestion / habits / project
+plan) that runs before the Claude call. Claude receives exactly the context
+it needs — nothing more. This replaced the old Swift
+`SchedulingContextBuilder`.
 
 ---
 
@@ -428,9 +524,9 @@ Prefs: WorkHours=9-18, BufferBetweenEvents=15min, PriorityCategories=[Study,Work
 Regenerate this string only when the user updates preferences — not on every API call.
 
 #### System Prompt Strategy
-- Keep one well-crafted system prompt stored locally
-- It defines Claude's role, output format (always structured JSON), and constraints
-- Never regenerate it dynamically — it's static until you deliberately update it
+- All system prompts live **server-side** in `server/prompts/index.js` — the client never holds or builds a prompt
+- Each defines Claude's role, output format (always structured JSON, except the plain-text habit insight), and constraints
+- Never regenerate them dynamically — they're static until deliberately updated
 
 #### Output Format Contract
 Always instruct Claude to return a strict JSON schema. Example for event scheduling:
@@ -457,9 +553,9 @@ Local Data Layer (SwiftData or Core Data)
     ↓
 Scheduler Service (local logic: conflict detection, free slot finder)
     ↓
-SchedulingContextBuilder (intent → structured API payload)
+AI Service (typed DTO exchange with the /v1 backend — only when needed)
     ↓
-AI Service (Claude API calls — only when needed)
+Backend server (server/: prompts, context building, Claude calls, parsing)
     ↓
 Preferences Store (UserDefaults or local DB)
     ↓

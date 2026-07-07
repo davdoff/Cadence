@@ -25,8 +25,10 @@ struct OverviewView: View {
         }
     }
 
+    // .displaced is excluded everywhere: the planner moved those aside, the user
+    // didn't fail them — they must not drag down completion/missed stats.
     private var periodEvents: [Event] {
-        allEvents.filter { $0.startTime >= periodStart }
+        allEvents.filter { $0.startTime >= periodStart && $0.status != .displaced }
     }
 
     // MARK: - Stats

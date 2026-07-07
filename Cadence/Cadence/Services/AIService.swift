@@ -15,65 +15,90 @@ struct EventDraft {
     var categoryName: String
 }
 
+struct ProjectPhaseData {
+    var title: String
+    var subtasks: [String]
+    var targetDate: Date?
+}
+
 enum AIServiceError: LocalizedError {
     case invalidResponse
     case apiError(statusCode: Int)
     case networkError(Error)
+    // /v1 uniform error envelope: { error: { code, message } }
+    case serverError(code: String, message: String)
 
     var errorDescription: String? {
         switch self {
         case .invalidResponse:          return "The AI returned an unexpected response."
         case .apiError(let code):       return "API error (HTTP \(code))."
         case .networkError(let error):  return error.localizedDescription
+        case .serverError(let code, let message):
+            switch code {
+            case "AI_UNPARSEABLE": return "The AI couldn't produce a usable answer. Try rephrasing."
+            case "TIMEOUT":        return "The AI request timed out. Try again."
+            case "AI_UPSTREAM":    return "The AI service is unavailable right now."
+            default:               return message
+            }
         }
     }
 }
 
 // MARK: - Service
 
+/// Thin typed-DTO client for the /v1 planning API (BACKEND_PLAN.md §3).
+/// The server owns prompts, Claude calls, parsing, and validation — this
+/// struct only encodes snapshots and decodes typed decisions. It never
+/// imports SwiftUI, touches SwiftData contexts, or schedules notifications.
 struct AIService {
     // Update this URL each time ngrok restarts.
     static var proxyBaseURL = "https://schnapps-unsent-capably.ngrok-free.dev"
 
-    private let scheduler = SchedulerService()
-
-    /// Swap this in tests to avoid hitting the proxy.
+    /// Test hook: request body JSON string in → response JSON string out.
+    /// Swap this in tests to exercise encode/decode without the network.
     var _callAPI: ((String) async throws -> String)?
 
-    func scheduleEvent(
-        description: String,
-        events: [Event],
-        preferences: UserPreferences,
-        categories: [Category]
-    ) async throws -> SchedulingDecision {
-        let now = Date.now
-        let window = now...now.addingTimeInterval(72 * 3600)
-        let freeSlots = scheduler.freeSlots(duration: 30, in: window, events: events, preferences: preferences)
-        let message = SchedulingContextBuilder().build(
-            .addToFreeSlot(description: description, freeSlots: freeSlots),
-            preferences: preferences
-        )
-        let rawJSON: String
-        if let callAPI = _callAPI {
-            rawJSON = try await callAPI(message)
-        } else {
-            rawJSON = try await callProxy(route: "/api/schedule/add", systemPrompt: AIService.systemPrompt, userPayload: message)
-        }
-        return try parseResponse(rawJSON)
+    // MARK: Shared plumbing
+
+    /// ISO8601 with the device's UTC offset (never Z for local zones) — the
+    /// format the /v1 contract requires for every time field.
+    static func deviceISOFormatter() -> ISO8601DateFormatter {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        f.timeZone = .current
+        return f
     }
-}
 
-// MARK: - Network
+    /// Only what planning needs: today onward, plus anything awaiting rescheduling.
+    static func snapshots(_ events: [Event], now: Date, iso: ISO8601DateFormatter) -> [EventSnapshotDTO] {
+        let startOfToday = Calendar.current.startOfDay(for: now)
+        return events
+            .filter { $0.endTime >= startOfToday || $0.status == .missed || $0.status == .displaced }
+            .map { EventSnapshotDTO(event: $0, iso: iso) }
+    }
 
-private extension AIService {
-    func callProxy(route: String, systemPrompt: String, userPayload: String) async throws -> String {
+    /// Encode → POST (or test hook) → response data.
+    func exchange(route: String, body: Data) async throws -> Data {
+        if let callAPI = _callAPI {
+            let raw = try await callAPI(String(decoding: body, as: UTF8.self))
+            return Data(raw.utf8)
+        }
+        return try await postV1(route: route, body: body)
+    }
+
+    private struct V1ErrorEnvelope: Decodable {
+        struct Inner: Decodable { let code: String; let message: String }
+        let error: Inner
+    }
+
+    /// POST a JSON body to a /v1 route; non-2xx responses carry the uniform
+    /// error envelope which is surfaced as AIServiceError.serverError.
+    private func postV1(route: String, body: Data) async throws -> Data {
         let url = URL(string: "\(AIService.proxyBaseURL)\(route)")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "content-type")
-
-        let body = ["systemPrompt": systemPrompt, "userPayload": userPayload]
-        request.httpBody = try JSONEncoder().encode(body)
+        request.httpBody = body
 
         let (data, response): (Data, URLResponse)
         do {
@@ -83,75 +108,150 @@ private extension AIService {
         }
 
         guard let http = response as? HTTPURLResponse else { throw AIServiceError.invalidResponse }
-        guard (200...299).contains(http.statusCode) else { throw AIServiceError.apiError(statusCode: http.statusCode) }
-
-        let envelope = try JSONDecoder().decode(ClaudeAPIResponse.self, from: data)
-        guard let text = envelope.content.first?.text else { throw AIServiceError.invalidResponse }
-        return text
+        guard (200...299).contains(http.statusCode) else {
+            if let envelope = try? JSONDecoder().decode(V1ErrorEnvelope.self, from: data) {
+                throw AIServiceError.serverError(code: envelope.error.code, message: envelope.error.message)
+            }
+            throw AIServiceError.apiError(statusCode: http.statusCode)
+        }
+        return data
     }
 }
 
-// MARK: - Response Parsing
+// MARK: - Scheduling decisions (/v1/schedule/add | move | reschedule)
 
-private extension AIService {
-    func parseResponse(_ json: String) throws -> SchedulingDecision {
-        guard let data = json.data(using: .utf8),
-              let raw = try? JSONDecoder().decode(RawDecision.self, from: data)
-        else { throw AIServiceError.invalidResponse }
+extension AIService {
 
-        let iso = ISO8601DateFormatter()
+    func scheduleEvent(
+        description: String,
+        events: [Event],
+        preferences: UserPreferences,
+        categories: [Category]
+    ) async throws -> SchedulingDecision {
+        let iso = Self.deviceISOFormatter()
+        let now = Date.now
+        struct Request: Encodable {
+            let now: String; let timezone: String; let description: String
+            let events: [EventSnapshotDTO]; let prefs: PrefsSnapshotDTO
+        }
+        let body = try JSONEncoder().encode(Request(
+            now: iso.string(from: now),
+            timezone: TimeZone.current.identifier,
+            description: description,
+            events: Self.snapshots(events, now: now, iso: iso),
+            prefs: PrefsSnapshotDTO(preferences: preferences, categories: categories)
+        ))
+        return try Self.decodeDecision(await exchange(route: "/v1/schedule/add", body: body), iso: iso)
+    }
 
-        func draft(title: String, start: String, end: String, category: String) throws -> EventDraft {
-            guard let s = iso.date(from: start), let e = iso.date(from: end) else {
-                throw AIServiceError.invalidResponse
-            }
-            return EventDraft(title: title, start: s, end: e, categoryName: category)
+    func moveEvent(
+        event: Event,
+        reason: String,
+        allEvents: [Event],
+        preferences: UserPreferences,
+        categories: [Category] = []
+    ) async throws -> SchedulingDecision {
+        let iso = Self.deviceISOFormatter()
+        let now = Date.now
+        struct Request: Encodable {
+            let now: String; let timezone: String
+            let event: EventSnapshotDTO; let reason: String
+            let events: [EventSnapshotDTO]; let prefs: PrefsSnapshotDTO
+        }
+        let body = try JSONEncoder().encode(Request(
+            now: iso.string(from: now),
+            timezone: TimeZone.current.identifier,
+            event: EventSnapshotDTO(event: event, iso: iso),
+            reason: reason,
+            events: Self.snapshots(allEvents, now: now, iso: iso),
+            prefs: PrefsSnapshotDTO(preferences: preferences, categories: categories)
+        ))
+        return try Self.decodeDecision(await exchange(route: "/v1/schedule/move", body: body), iso: iso)
+    }
+
+    func rescheduleMissed(
+        event: Event,
+        missedCount: Int,
+        allEvents: [Event],
+        preferences: UserPreferences,
+        categories: [Category] = []
+    ) async throws -> SchedulingDecision {
+        let iso = Self.deviceISOFormatter()
+        let now = Date.now
+        struct Request: Encodable {
+            let now: String; let timezone: String
+            let event: EventSnapshotDTO; let missedCount: Int
+            let events: [EventSnapshotDTO]; let prefs: PrefsSnapshotDTO
+        }
+        let body = try JSONEncoder().encode(Request(
+            now: iso.string(from: now),
+            timezone: TimeZone.current.identifier,
+            event: EventSnapshotDTO(event: event, iso: iso),
+            missedCount: missedCount,
+            events: Self.snapshots(allEvents, now: now, iso: iso),
+            prefs: PrefsSnapshotDTO(preferences: preferences, categories: categories)
+        ))
+        return try Self.decodeDecision(await exchange(route: "/v1/schedule/reschedule", body: body), iso: iso)
+    }
+
+    /// Typed decision from the server: { action, event, conflictReason, alternatives }.
+    static func decodeDecision(_ data: Data, iso: ISO8601DateFormatter) throws -> SchedulingDecision {
+        struct Raw: Decodable {
+            struct Draft: Decodable { let title: String; let start: String; let end: String; let category: String }
+            struct Slot: Decodable { let start: String; let end: String }
+            let action: String
+            let event: Draft?
+            let conflictReason: String?
+            let alternatives: [Slot]
+        }
+        guard let raw = try? JSONDecoder().decode(Raw.self, from: data) else {
+            throw AIServiceError.invalidResponse
         }
 
-        func slot(start: String, end: String) throws -> EventDraft {
-            guard let s = iso.date(from: start), let e = iso.date(from: end) else {
-                throw AIServiceError.invalidResponse
-            }
-            return EventDraft(title: "", start: s, end: e, categoryName: "")
+        func date(_ s: String) throws -> Date {
+            guard let d = iso.date(from: s) else { throw AIServiceError.invalidResponse }
+            return d
+        }
+        func slots(_ raw: [Raw.Slot]) throws -> [EventDraft] {
+            try raw.map { EventDraft(title: "", start: try date($0.start), end: try date($0.end), categoryName: "") }
         }
 
         switch raw.action {
         case "add":
             guard let ev = raw.event else { throw AIServiceError.invalidResponse }
-            return .add(try draft(title: ev.title, start: ev.start, end: ev.end, category: ev.category))
-
+            return .add(EventDraft(title: ev.title, start: try date(ev.start), end: try date(ev.end), categoryName: ev.category))
         case "conflict":
-            let alts = try raw.alternatives.map { try slot(start: $0.start, end: $0.end) }
-            return .conflict(reason: raw.conflict_reason ?? "", alternatives: alts)
-
+            return .conflict(reason: raw.conflictReason ?? "", alternatives: try slots(raw.alternatives))
         case "suggest_alternative":
-            let alts = try raw.alternatives.map { try slot(start: $0.start, end: $0.end) }
-            return .suggestAlternative(alts)
-
+            return .suggestAlternative(try slots(raw.alternatives))
         default:
             throw AIServiceError.invalidResponse
         }
     }
 }
 
-// MARK: - Habit Analysis
+// MARK: - Habit Analysis (/v1/habits/analysis)
 
 extension AIService {
     func analyzeHabits(_ summaries: [HabitWeekSummary]) async throws -> String {
         guard !summaries.isEmpty else { return "" }
-        let payload = summaries.map { s in
-            let trend = s.weekTotal > s.priorWeekTotal ? "↑" : (s.weekTotal < s.priorWeekTotal ? "↓" : "→")
-            return "\(s.name)=\(s.weekTotal)(\(trend) from \(s.priorWeekTotal))"
-        }.joined(separator: ", ")
-        let message = "HABITS_WEEK: \(payload)"
-        if let callAPI = _callAPI {
-            return try await callAPI(message)
+        struct Request: Encodable {
+            struct Habit: Encodable { let name: String; let weekTotal: Int; let priorWeekTotal: Int }
+            let habits: [Habit]
         }
-        return try await callProxy(route: "/api/habit/analysis", systemPrompt: AIService.habitSystemPrompt, userPayload: message)
+        struct Response: Decodable { let insight: String }
+        let body = try JSONEncoder().encode(Request(
+            habits: summaries.map { .init(name: $0.name, weekTotal: $0.weekTotal, priorWeekTotal: $0.priorWeekTotal) }
+        ))
+        let data = try await exchange(route: "/v1/habits/analysis", body: body)
+        guard let response = try? JSONDecoder().decode(Response.self, from: data) else {
+            throw AIServiceError.invalidResponse
+        }
+        return response.insight
     }
 }
 
-// MARK: - Meal Suggestions
+// MARK: - Meal Suggestions (/v1/meal/suggestions)
 
 extension AIService {
 
@@ -161,228 +261,97 @@ extension AIService {
         var scheduledEnd: Date
     }
 
-    /// Returns 2–3 new-meal options for the user to choose from. Callers must respect
-    /// the daily fetch cap (UserPreferences.canFetchMealSuggestion) before invoking.
+    /// Returns up to 3 new-meal options scheduled into today's free dinner
+    /// slots (the server computes slots and clamps to the dinner window).
+    /// Callers must respect the daily fetch cap
+    /// (UserPreferences.canFetchMealSuggestion) before invoking.
     func suggestMealOptions(
         existingMeals: [Meal],
-        freeDinnerSlots: [TimeSlot],
+        events: [Event],
         preferences: UserPreferences,
-        referenceWeek: [Date]
+        categories: [Category] = []
     ) async throws -> [MealSuggestionResult] {
-        let builder = SchedulingContextBuilder()
-        let message = builder.build(.mealSuggestion(existingMeals: existingMeals, freeDinnerSlots: freeDinnerSlots), preferences: preferences)
-
-        let rawJSON: String
-        if let callAPI = _callAPI {
-            rawJSON = try await callAPI(message)
-        } else {
-            rawJSON = try await callProxy(route: "/api/meal/suggestion", systemPrompt: AIService.mealSuggestionSystemPrompt, userPayload: message)
+        let iso = Self.deviceISOFormatter()
+        let now = Date.now
+        struct Request: Encodable {
+            struct MealDTO: Encodable { let name: String; let prepTimeMinutes: Int }
+            let now: String; let timezone: String; let days: Int
+            let existingMeals: [MealDTO]
+            let events: [EventSnapshotDTO]; let prefs: PrefsSnapshotDTO
         }
+        let body = try JSONEncoder().encode(Request(
+            now: iso.string(from: now),
+            timezone: TimeZone.current.identifier,
+            days: 1, // meals are planned during the day, not a week ahead
+            existingMeals: existingMeals.map { .init(name: $0.name, prepTimeMinutes: $0.prepTimeMinutes) },
+            events: Self.snapshots(events, now: now, iso: iso),
+            prefs: PrefsSnapshotDTO(preferences: preferences, categories: categories)
+        ))
+        let data = try await exchange(route: "/v1/meal/suggestions", body: body)
 
-        return try parseMealSuggestions(rawJSON, referenceWeek: referenceWeek, preferences: preferences)
-    }
-
-    private func parseMealSuggestions(
-        _ json: String,
-        referenceWeek: [Date],
-        preferences: UserPreferences
-    ) throws -> [MealSuggestionResult] {
-        guard let data = json.data(using: .utf8),
-              let raw = try? JSONDecoder().decode(RawMealSuggestions.self, from: data)
-        else { throw AIServiceError.invalidResponse }
-
-        // Options with an unparseable slot are dropped rather than failing the batch.
-        let results = raw.meals.compactMap { entry -> MealSuggestionResult? in
-            guard let start = parseSlot(entry.scheduledSlot, referenceWeek: referenceWeek) else { return nil }
-
-            let meal = Meal(name: entry.name, prepTimeMinutes: entry.prepTimeMinutes, isUserDefined: false)
-            meal.tags = entry.tags
-
-            let durationMinutes = entry.prepTimeMinutes > 0 ? entry.prepTimeMinutes : 45
-            let windowEnd = Calendar.current.date(
-                bySettingHour: preferences.dinnerWindowEndHour,
-                minute: preferences.dinnerWindowEndMinute,
-                second: 0, of: start
-            ) ?? start.addingTimeInterval(3600)
-            let end = Swift.min(start.addingTimeInterval(TimeInterval(durationMinutes * 60)), windowEnd)
-
+        struct Response: Decodable {
+            struct Item: Decodable {
+                let name: String; let prepTimeMinutes: Int
+                let tags: [String]; let start: String; let end: String
+            }
+            let suggestions: [Item]
+        }
+        guard let response = try? JSONDecoder().decode(Response.self, from: data) else {
+            throw AIServiceError.invalidResponse
+        }
+        return try response.suggestions.map { item in
+            guard let start = iso.date(from: item.start), let end = iso.date(from: item.end) else {
+                throw AIServiceError.invalidResponse
+            }
+            let meal = Meal(name: item.name, prepTimeMinutes: item.prepTimeMinutes, isUserDefined: false)
+            meal.tags = item.tags
             return MealSuggestionResult(meal: meal, scheduledStart: start, scheduledEnd: end)
         }
-
-        guard !results.isEmpty else { throw AIServiceError.invalidResponse }
-        return results
-    }
-
-    private func parseSlot(_ slot: String, referenceWeek: [Date]) -> Date? {
-        let parts = slot.split(separator: " ")
-        guard parts.count == 2 else { return nil }
-        let dayAbbr = String(parts[0]).uppercased()
-        let timeParts = parts[1].split(separator: ":")
-        guard timeParts.count == 2,
-              let hour = Int(timeParts[0]),
-              let minute = Int(timeParts[1]) else { return nil }
-
-        let fmt = DateFormatter()
-        fmt.dateFormat = "EEE"
-        fmt.locale = Locale(identifier: "en_US_POSIX")
-
-        for date in referenceWeek {
-            if fmt.string(from: date).uppercased() == dayAbbr {
-                return Calendar.current.date(bySettingHour: hour, minute: minute, second: 0, of: date)
-            }
-        }
-        return nil
     }
 }
 
-// MARK: - Move Event
-
-extension AIService {
-    func moveEvent(
-        event: Event,
-        reason: String,
-        allEvents: [Event],
-        preferences: UserPreferences
-    ) async throws -> SchedulingDecision {
-        let now = Date.now
-        let window = now...now.addingTimeInterval(7 * 24 * 3600)
-        let freeSlots = scheduler.freeSlots(duration: 30, in: window, events: allEvents, preferences: preferences)
-        let cal = Calendar.current
-        let surrounding = allEvents.filter {
-            $0.id != event.id &&
-            $0.status != .missed &&
-            cal.isDate($0.startTime, inSameDayAs: event.startTime)
-        }
-        let message = SchedulingContextBuilder().build(
-            .moveEvent(event: event, reason: reason, surroundingEvents: surrounding, freeSlots: freeSlots),
-            preferences: preferences
-        )
-        let rawJSON: String
-        if let callAPI = _callAPI {
-            rawJSON = try await callAPI(message)
-        } else {
-            rawJSON = try await callProxy(route: "/api/schedule/move", systemPrompt: AIService.systemPrompt, userPayload: message)
-        }
-        return try parseResponse(rawJSON)
-    }
-}
-
-// MARK: - Reschedule Missed
-
-extension AIService {
-    func rescheduleMissed(
-        event: Event,
-        missedCount: Int,
-        allEvents: [Event],
-        preferences: UserPreferences
-    ) async throws -> SchedulingDecision {
-        let now = Date.now
-        let window = now...now.addingTimeInterval(7 * 24 * 3600)
-        let freeSlots = scheduler.freeSlots(duration: 30, in: window, events: allEvents, preferences: preferences)
-        let message = SchedulingContextBuilder().build(
-            .rescheduleMissed(event: event, missedCount: missedCount, freeSlots: freeSlots),
-            preferences: preferences
-        )
-        let rawJSON: String
-        if let callAPI = _callAPI {
-            rawJSON = try await callAPI(message)
-        } else {
-            rawJSON = try await callProxy(route: "/api/schedule/reschedule", systemPrompt: AIService.systemPrompt, userPayload: message)
-        }
-        return try parseResponse(rawJSON)
-    }
-}
-
-// MARK: - Deep Project Plan
-
-struct ProjectPhaseData {
-    var title: String
-    var subtasks: [String]
-    var targetDate: Date?
-}
+// MARK: - Deep Project Plan (/v1/project/plan)
 
 extension AIService {
     func deepProjectPlan(
         goal: String,
         deadline: Date,
         weeklyHours: Int,
-        constraints: String,
-        preferences: UserPreferences
+        constraints: String
     ) async throws -> [ProjectPhaseData] {
-        let message = SchedulingContextBuilder().build(
-            .deepProjectPlan(goal: goal, deadline: deadline, weeklyHours: weeklyHours, constraints: constraints),
-            preferences: preferences
-        )
-        let rawJSON: String
-        if let callAPI = _callAPI {
-            rawJSON = try await callAPI(message)
-        } else {
-            rawJSON = try await callProxy(route: "/api/project/plan", systemPrompt: AIService.projectPlanSystemPrompt, userPayload: message)
+        struct Request: Encodable {
+            let now: String; let timezone: String
+            let goal: String; let deadline: String
+            let weeklyHours: Int; let constraints: String
         }
-        return try parseProjectPlan(rawJSON)
-    }
-}
+        struct Response: Decodable {
+            struct Phase: Decodable { let title: String; let subtasks: [String]; let targetDate: String? }
+            let phases: [Phase]
+        }
 
-private extension AIService {
-    func parseProjectPlan(_ json: String) throws -> [ProjectPhaseData] {
-        guard let data = json.data(using: .utf8),
-              let raw = try? JSONDecoder().decode(RawProjectPlan.self, from: data)
-        else { throw AIServiceError.invalidResponse }
+        let iso = Self.deviceISOFormatter()
+        let dayFmt = DateFormatter()
+        dayFmt.dateFormat = "yyyy-MM-dd"
+        dayFmt.locale = Locale(identifier: "en_US_POSIX")
 
-        let fmt = DateFormatter()
-        fmt.dateFormat = "yyyy-MM-dd"
-        fmt.locale = Locale(identifier: "en_US_POSIX")
-
-        return raw.phases.map { phase in
+        let body = try JSONEncoder().encode(Request(
+            now: iso.string(from: .now),
+            timezone: TimeZone.current.identifier,
+            goal: goal,
+            deadline: dayFmt.string(from: deadline),
+            weeklyHours: weeklyHours,
+            constraints: constraints
+        ))
+        let data = try await exchange(route: "/v1/project/plan", body: body)
+        guard let response = try? JSONDecoder().decode(Response.self, from: data) else {
+            throw AIServiceError.invalidResponse
+        }
+        return response.phases.map { phase in
             ProjectPhaseData(
                 title: phase.title,
                 subtasks: phase.subtasks,
-                targetDate: phase.targetDate.flatMap { fmt.date(from: $0) }
+                targetDate: phase.targetDate.flatMap { dayFmt.date(from: $0) }
             )
         }
-    }
-}
-
-private struct RawProjectPlan: Decodable {
-    struct Phase: Decodable {
-        let title: String
-        let subtasks: [String]
-        let targetDate: String?
-    }
-    let phases: [Phase]
-}
-
-private struct RawMealSuggestions: Decodable {
-    struct MealData: Decodable {
-        let name: String
-        let prepTimeMinutes: Int
-        let tags: [String]
-        let scheduledSlot: String
-    }
-    let meals: [MealData]
-}
-
-// MARK: - Private Codable Types
-
-private struct ClaudeAPIResponse: Decodable {
-    let content: [ContentBlock]
-    struct ContentBlock: Decodable { let text: String }
-}
-
-private struct RawDecision: Decodable {
-    let action: String
-    let event: RawEvent?
-    let conflict_reason: String?
-    let alternatives: [RawSlot]
-
-    struct RawEvent: Decodable {
-        let title: String
-        let start: String
-        let end: String
-        let category: String
-    }
-    struct RawSlot: Decodable {
-        let start: String
-        let end: String
     }
 }

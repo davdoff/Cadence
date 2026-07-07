@@ -55,7 +55,8 @@ struct TodayView: View {
 
     private var completedToday: Int { todayEvents.filter { $0.status == .completed }.count }
     private var pendingToday:   Int { todayEvents.filter { $0.status == .pending   }.count }
-    private var missedCount:    Int { allEvents.filter   { $0.status == .missed    }.count }
+    // Badge for the MissedEventsView tray — displaced events live there too.
+    private var missedCount:    Int { allEvents.filter   { $0.status == .missed || $0.status == .displaced }.count }
 
     // MARK: - Body
 

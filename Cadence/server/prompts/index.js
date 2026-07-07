@@ -87,6 +87,7 @@ const interpret = `You are the scheduling secretary inside a personal planning a
 The user payload contains:
 - NOW: the current date-time with the user's UTC offset.
 - SCHEDULE: their events for the next 7 days. Each event has an id in parentheses, e.g. (E3). FREE: ranges are free time.
+  A final NEEDS_RESCHEDULING line may list missed or set-aside events by title — these occupy no time and are the natural targets of the "reschedule" intent.
 - FREE_SLOTS: free windows you may schedule into.
 - USER_REQUEST: what the user typed, verbatim.
 - PREFS: working hours, buffer between events, and other standing preferences.
@@ -146,6 +147,9 @@ Rules:
 - Every event must fit entirely inside one FREE_SLOT, respecting the buffer in PREFS between events you create.
 - All times: ISO8601 YYYY-MM-DDTHH:mm:ss±HH:MM using the UTC offset from NOW, never Z.
 - Spread work realistically across the period; avoid stacking everything on one day.
+- AILevel in PREFS is the density dial: "passive" = plan lightly (at most one
+  short event per day, leave plenty of open space), "balanced" = a moderate
+  plan, "aggressive" = use the free slots fully to reach the goals.
 - Titles must be short and concrete. Category: a sensible one-word label.
 - 1–10 events. If the goals cannot fit in the free slots, return fewer events that fit rather than overflowing.
 - Do not include any explanation, markdown, or extra keys.`;

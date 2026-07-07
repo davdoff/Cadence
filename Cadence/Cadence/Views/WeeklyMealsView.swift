@@ -401,6 +401,8 @@ struct WeeklyMealsView: View {
     private func fetchSuggestions() async {
         guard let p = prefs, p.canFetchMealSuggestion() else { return }
 
+        // Instant offline guard — the server recomputes slots authoritatively,
+        // but there's no point paying a round trip when today is clearly full.
         let today = Calendar.current.startOfDay(for: Date())
         let slots = MealSchedulerService().remainingDinnerSlots(
             for: [today],
@@ -422,9 +424,9 @@ struct WeeklyMealsView: View {
         do {
             suggestionOptions = try await AIService().suggestMealOptions(
                 existingMeals: allMeals,
-                freeDinnerSlots: slots,
+                events: allEvents,
                 preferences: p,
-                referenceWeek: [today]
+                categories: Array(categories)
             )
             showingSuggestionSheet = true
         } catch {

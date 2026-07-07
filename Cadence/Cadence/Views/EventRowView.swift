@@ -65,6 +65,9 @@ struct EventRowView: View {
         case .missed:
             Image(systemName: "exclamationmark.circle.fill")
                 .foregroundColor(.red)
+        case .displaced:
+            Image(systemName: "arrow.uturn.right.circle.fill")
+                .foregroundColor(.orange)
         case .pending:
             EmptyView()
         }
