@@ -21,9 +21,10 @@ const scheduler = require("../services/scheduler");
 const build = require("../services/contextBuilder");
 const parsers = require("../services/parsers");
 const { expandGoalsToEvents } = require("../services/expander");
+const ics = require("../services/ics");
 const prompts = require("../prompts");
 
-function createV1Router({ callClaude }) {
+function createV1Router({ callClaude, fetchImpl = globalThis.fetch }) {
   const router = express.Router();
 
   // Async handlers → error middleware
@@ -160,6 +161,26 @@ function createV1Router({ callClaude }) {
     }
     const insight = await callClaude({ system: prompts.habit, payload: build.buildHabits(habits) });
     res.json({ insight: insight.trim() }); // plain text — no JSON parse, no retry needed
+  }));
+
+  // ── Calendar import — deterministic ICS expansion, NO Claude call ───────
+  // calendar-import.md §4. Stateless: the feed URL is re-sent on every sync,
+  // never stored — and never logged, since secret feed URLs carry auth.
+
+  router.post("/calendar/ics", wrap(async (req, res) => {
+    const { zone } = parseBase(req.body); // `now` is required by contract; expansion itself is window-driven
+    const url = requireString(req.body, "url");
+    const windowStartRaw = requireString(req.body, "windowStart");
+    const windowEndRaw = requireString(req.body, "windowEnd");
+    const windowStart = parseISO(windowStartRaw, zone, "windowStart");
+    let windowEnd = parseISO(windowEndRaw, zone, "windowEnd");
+    if (/^\d{4}-\d{2}-\d{2}$/.test(windowEndRaw)) windowEnd = windowEnd.endOf("day"); // date-only end is inclusive
+    if (windowEnd <= windowStart) throw badRequest('"windowEnd" must be after "windowStart"');
+    if (windowEnd.diff(windowStart, "days").days > 91) {
+      throw badRequest('"windowStart"–"windowEnd" must span 90 days or fewer');
+    }
+    const icsText = await ics.fetchFeed(url, fetchImpl);
+    res.json(ics.expandFeed(icsText, { windowStart, windowEnd, zone }));
   }));
 
   // ── Deep project plan ────────────────────────────────────────────────────

@@ -324,8 +324,9 @@ server/
     contextBuilder.js # per-intent payload builders (port of the old Swift builder)
     parsers.js        # Claude-response → typed JSON parsers
     expander.js       # shared goals/phases → concrete-events expander
+    ics.js            # ICS feed fetch + RFC 5545/RRULE expansion (node-ical + rrule)
   lib/                # claude call + retry-once, DTO validation, errors, time
-  test/               # routes / scheduler / parsers tests (fake Claude, no network)
+  test/               # routes / scheduler / parsers / ics tests (fake Claude + fake fetch, no network)
 ```
 
 The server is **stateless and OS-blind**: every request carries `now` +
@@ -345,6 +346,7 @@ The server is **stateless and OS-blind**: every request carries `now` +
 | `POST /v1/meal/suggestions` | New-meal options fitted to dinner slots (returns `[]` without an AI call when no slots exist) |
 | `POST /v1/habits/analysis` | Weekly habit insight (plain text) |
 | `POST /v1/project/plan` | Deep project phase breakdown |
+| `POST /v1/calendar/ics` | **Deterministic — no Claude call.** Fetches an `.ics` feed URL (`webcal://` normalised) and expands it (RRULE/EXDATE/RDATE/RECURRENCE-ID, UTC/TZID/floating/all-day forms) into concrete event DTOs within a ≤ 90-day window. Stateless: the URL is re-sent on every sync, never stored or logged (secret feed URLs carry auth). Spec: `calendar-import.md` §4 |
 
 The old `/api/*` passthrough routes stay mounted (only when an API key is
 present) so the currently shipped iOS build keeps working during migration.
