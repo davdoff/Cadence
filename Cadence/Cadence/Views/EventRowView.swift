@@ -1,9 +1,12 @@
 import SwiftUI
 
 struct EventRowView: View {
-    @AppStorage("accentColorHex") private var accentColorHex = "#E8784D"
+    @Environment(\.theme) private var theme
     let event: Event
     var onEdit: (() -> Void)? = nil
+    /// Dense single-line variant used by Schedule's month mode to fit more
+    /// events on screen. Callers that omit it get the standard card row.
+    var compact: Bool = false
 
     private var timeRange: String {
         let f = DateFormatter()
@@ -11,7 +14,43 @@ struct EventRowView: View {
         return "\(f.string(from: event.startTime)) – \(f.string(from: event.endTime))"
     }
 
+    private var startTimeShort: String {
+        let f = DateFormatter()
+        f.dateFormat = "h:mm a"
+        return f.string(from: event.startTime)
+    }
+
     var body: some View {
+        if compact { compactBody } else { standardBody }
+    }
+
+    private var compactBody: some View {
+        HStack(spacing: 10) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(categoryColor)
+                .frame(width: 3, height: 26)
+
+            Text(startTimeShort)
+                .font(.caption.weight(.semibold))
+                .foregroundColor(.secondary)
+                .frame(width: 66, alignment: .leading)
+
+            Text(event.title)
+                .font(.subheadline)
+                .foregroundColor(.primary)
+                .lineLimit(1)
+
+            Spacer(minLength: 4)
+
+            statusBadge
+                .font(.caption)
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 12)
+        .cardStyle()
+    }
+
+    private var standardBody: some View {
         HStack(spacing: 12) {
             RoundedRectangle(cornerRadius: 3)
                 .fill(categoryColor)
@@ -35,7 +74,7 @@ struct EventRowView: View {
                         .font(.caption.weight(.semibold))
                         .foregroundColor(.secondary)
                         .padding(8)
-                        .background(Color.appDeep(accentColorHex))
+                        .background(theme.deep)
                         .clipShape(Circle())
                 }
                 .buttonStyle(.plain)
@@ -44,16 +83,14 @@ struct EventRowView: View {
             statusBadge
         }
         .padding(14)
-        .background(Color.white)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
+        .cardStyle()
     }
 
     private var categoryColor: Color {
         if let hex = event.category?.colorHex {
             return Color(hex: hex)
         }
-        return .accentLight(accentColorHex)
+        return theme.light
     }
 
     @ViewBuilder

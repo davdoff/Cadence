@@ -77,6 +77,23 @@ Each event supports:
 - Edit title, date, time, duration, and category from the event detail view (implemented — reuses the Add Event form in edit mode; `id`/`source`/`status` are never changed, and time changes cancel and reschedule the notification)
 - Mark as **Completed** or **Missed**
 - Assign to a **Category**
+- **Tap-through**: event rows on Today and Schedule open `EventDetailView`
+  (via `navigationDestination(item:)`); the detail view has an edit (pencil)
+  toolbar button that opens the same edit sheet
+- **Add from Schedule**: the Schedule tab has a toolbar `+` that opens
+  Add Event pre-set to the selected day (`AddEventView(initialDate:)`);
+  the "Today" toolbar button hides when today is already selected
+- **Week / Month modes**: a segmented toggle pinned under the title switches
+  the Schedule tab between two browsing styles (`ScheduleMode` enum in
+  `ScheduleView`). **Week** shows a paged, one-week-at-a-time day strip (swipe
+  to change weeks) with full event cards. **Month** shows a calendar grid with
+  per-day event dots (`monthDayCell`, up to 3) and prev/next month navigation,
+  and switches the day list to a dense single-line layout
+  (`EventRowView(compact:)`) so more events fit at once. Both modes share the
+  same selected day, day-stats bar, and category filter; `visibleWeekStart` /
+  `visibleMonth` stay in sync with the selected day (and the "Today" button)
+- Add Event validates the time range: Save is disabled and an inline
+  warning shows while end ≤ start (`DateInterval` would trap otherwise)
 
 ### 3. Categories
 - User-defined categories applied to all events
@@ -90,6 +107,26 @@ Each event supports:
 ### 5. Missed Events
 - Dedicated view listing all missed events
 - Option to **reschedule** missed events (AI-assisted or manual)
+- Reschedule opens Add Event prefilled from the original
+  (`AddEventView(reschedulingSource:)`) — the original event (title, category,
+  times) is deleted **only when the replacement is saved**; cancelling the
+  sheet keeps it. Imported events are tombstoned at that same save point so
+  calendar sync doesn't re-insert them.
+
+### 5b. UI theme layer (`Extensions/Theme.swift`)
+- `Theme` is a value derived from the accent hex, injected once from
+  `ContentView` via `.environment(\.theme, …)`; every view reads
+  `@Environment(\.theme)` — no view re-reads `@AppStorage("accentColorHex")`
+  (only `ContentView` and the Settings theme picker still touch the raw hex).
+- Palette: `theme.accent / background / deep / light / dark / cardSurface`
+  plus gradients: `accentGradient` (filled buttons, selected pills, rings),
+  `backgroundGradient` (page backgrounds), `barGradient` (progress bars),
+  `cardGradient` (subtle card wash).
+- `.cardStyle(prominent:)` is the shared card chrome (surface + corner
+  radius + shadow) used by all white cards; hero cards (Overview ring,
+  Habits summary) pass `prominent: true`.
+- Widgets still mirror the flat accent via `WidgetSync.mirrorAccent` — the
+  widget target has **not** had a gradient pass yet.
 
 ## 6. Meal Planning (Detailed)
 
@@ -284,6 +321,8 @@ struct MealSchedulerService {
 - Schedule preferences (working hours, buffer time, priority windows)
 - Food preferences (list of meals the user can prepare)
 - AI behaviour preferences (how aggressive/passive scheduling suggestions are)
+- **All prefs screens autosave** on change (`onChange` → save) — the
+  Settings tab has no explicit Save button anymore
 
 ### 8. Push Notifications
 - **Event reminders** — notify the user ahead of upcoming events (configurable lead time, e.g. 10 / 30 / 60 minutes before)

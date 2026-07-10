@@ -7,7 +7,7 @@ struct FoodPreferencesView: View {
     @Query(sort: \Event.startTime) private var allEvents: [Event]
     @Query private var categories: [Category]
     @Environment(\.modelContext) private var context
-    @AppStorage("accentColorHex") private var accentColorHex = "#E8784D"
+    @Environment(\.theme) private var theme
 
     @State private var breakfastEnabled = true
     @State private var breakfastTime = Date()
@@ -29,7 +29,7 @@ struct FoodPreferencesView: View {
 
     var body: some View {
         ZStack {
-            Color.appBackground(accentColorHex).ignoresSafeArea()
+            theme.backgroundGradient.ignoresSafeArea()
             Form {
                 breakfastSection
                 dinnerSection
@@ -40,7 +40,7 @@ struct FoodPreferencesView: View {
         }
         .navigationTitle("Food")
         .navigationBarTitleDisplayMode(.large)
-        .toolbarBackground(Color.appBackground(accentColorHex), for: .navigationBar)
+        .toolbarBackground(theme.background, for: .navigationBar)
         .onAppear(perform: loadPrefs)
         .onDisappear(perform: triggerDailyPass)
         .sheet(isPresented: $showingAddMeal) {
@@ -53,7 +53,7 @@ struct FoodPreferencesView: View {
     private var breakfastSection: some View {
         Section("Breakfast") {
             Toggle("Schedule breakfast", isOn: $breakfastEnabled)
-                .tint(Color(hex: accentColorHex))
+                .tint(theme.accent)
                 .onChange(of: breakfastEnabled) { savePrefs() }
 
             if breakfastEnabled {
@@ -118,7 +118,7 @@ struct FoodPreferencesView: View {
                 showingAddMeal = true
             } label: {
                 Label("Add meal", systemImage: "plus.circle.fill")
-                    .foregroundColor(Color(hex: accentColorHex))
+                    .foregroundColor(theme.accent)
             }
         } header: {
             Text("My Meals")
@@ -128,7 +128,7 @@ struct FoodPreferencesView: View {
     private var discoverySection: some View {
         Section("Meal Discovery") {
             Toggle("Suggest a new meal to try each week", isOn: $newMealSuggestionEnabled)
-                .tint(Color(hex: accentColorHex))
+                .tint(theme.accent)
                 .onChange(of: newMealSuggestionEnabled) { savePrefs() }
 
             if newMealSuggestionEnabled {
@@ -176,9 +176,9 @@ struct FoodPreferencesView: View {
                         Text("AI pick")
                             .font(.system(size: 10, weight: .semibold))
                     }
-                    .foregroundColor(Color(hex: accentColorHex))
+                    .foregroundColor(theme.accent)
                     .padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(Color(hex: accentColorHex).opacity(0.12))
+                    .background(theme.accent.opacity(0.12))
                     .clipShape(Capsule())
                 }
             }

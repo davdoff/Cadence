@@ -6,7 +6,7 @@ import SwiftData
 /// Every mutating intent is previewed here and confirmed before anything
 /// is written — nothing happens behind the user's back.
 struct AIInputView: View {
-    @AppStorage("accentColorHex") private var accentColorHex = "#E8784D"
+    @Environment(\.theme) private var theme
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
 
@@ -32,7 +32,7 @@ struct AIInputView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.appBackground(accentColorHex).ignoresSafeArea()
+                theme.backgroundGradient.ignoresSafeArea()
                 ScrollView {
                     VStack(spacing: 16) {
                         inputRow
@@ -56,7 +56,7 @@ struct AIInputView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
-                        .foregroundColor(.appAccent(accentColorHex))
+                        .foregroundColor(theme.accent)
                 }
             }
             .sheet(isPresented: $showPlanSheet) {
@@ -76,9 +76,9 @@ struct AIInputView: View {
         Button { showPlanSheet = true } label: {
             Label("Plan a period…", systemImage: "wand.and.stars")
                 .font(.caption.weight(.semibold))
-                .foregroundColor(.appAccent(accentColorHex))
+                .foregroundColor(theme.accent)
                 .padding(.horizontal, 12).padding(.vertical, 7)
-                .background(Color.white)
+                .background(theme.cardSurface)
                 .clipShape(Capsule())
                 .shadow(color: .black.opacity(0.04), radius: 3, y: 1)
         }
@@ -93,14 +93,12 @@ struct AIInputView: View {
             TextField("e.g. move my gym to tomorrow morning", text: $description, axis: .vertical)
                 .lineLimit(1...4)
                 .padding(12)
-                .background(Color.white)
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-                .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
+                .cardStyle()
 
             Button { submit(description) } label: {
                 Image(systemName: "arrow.up.circle.fill")
                     .font(.system(size: 38))
-                    .foregroundColor(canSubmit ? .appAccent(accentColorHex) : .accentLight(accentColorHex))
+                    .foregroundColor(canSubmit ? theme.accent : theme.light)
             }
             .disabled(!canSubmit || isLoading)
         }
@@ -144,7 +142,7 @@ struct AIInputView: View {
     private func interpretationHeader(_ text: String, icon: String = "sparkles") -> some View {
         Label(text, systemImage: icon)
             .font(.caption.weight(.semibold))
-            .foregroundColor(.appAccent(accentColorHex))
+            .foregroundColor(theme.accent)
     }
 
     private func addConfirmCard(interpretation: String, draft: EventDraft) -> some View {
@@ -161,19 +159,19 @@ struct AIInputView: View {
                     Text(draft.categoryName)
                         .font(.caption)
                         .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(Color.accentLight(accentColorHex).opacity(0.25))
+                        .background(theme.light.opacity(0.25))
                         .clipShape(Capsule())
                 }
             }
             .padding()
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.white)
+            .background(theme.cardSurface)
             .clipShape(RoundedRectangle(cornerRadius: 14))
 
             confirmButton("Confirm & Add") { insertDrafts([draft]) }
         }
         .padding()
-        .background(Color.appDeep(accentColorHex))
+        .background(theme.deep)
         .clipShape(RoundedRectangle(cornerRadius: 18))
     }
 
@@ -188,20 +186,22 @@ struct AIInputView: View {
                 .foregroundColor(.secondary)
                 .padding()
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.white)
+                .background(theme.cardSurface)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
 
             if !alternatives.isEmpty {
                 Text("Available slots")
                     .font(.caption.weight(.semibold))
                     .foregroundColor(.secondary)
+                // Keep the server's title; insertDrafts falls back to the
+                // typed request only when it's empty (UI_REVIEW §1.4).
                 ForEach(Array(alternatives.enumerated()), id: \.offset) { _, slot in
-                    slotButton(EventDraft(title: description, start: slot.start, end: slot.end, categoryName: ""))
+                    slotButton(slot)
                 }
             }
         }
         .padding()
-        .background(Color.appDeep(accentColorHex))
+        .background(theme.deep)
         .clipShape(RoundedRectangle(cornerRadius: 18))
     }
 
@@ -210,11 +210,11 @@ struct AIInputView: View {
             interpretationHeader(interpretation)
 
             ForEach(Array(drafts.enumerated()), id: \.offset) { _, draft in
-                slotButton(EventDraft(title: description, start: draft.start, end: draft.end, categoryName: draft.categoryName))
+                slotButton(draft)
             }
         }
         .padding()
-        .background(Color.appDeep(accentColorHex))
+        .background(theme.deep)
         .clipShape(RoundedRectangle(cornerRadius: 18))
     }
 
@@ -239,7 +239,7 @@ struct AIInputView: View {
                 }
                 .padding()
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.white)
+                .background(theme.cardSurface)
                 .clipShape(RoundedRectangle(cornerRadius: 14))
 
                 confirmButton("Confirm \(label)") {
@@ -265,7 +265,7 @@ struct AIInputView: View {
             }
         }
         .padding()
-        .background(Color.appDeep(accentColorHex))
+        .background(theme.deep)
         .clipShape(RoundedRectangle(cornerRadius: 18))
     }
 
@@ -300,13 +300,13 @@ struct AIInputView: View {
             }
             .padding()
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.white)
+            .background(theme.cardSurface)
             .clipShape(RoundedRectangle(cornerRadius: 14))
 
             confirmButton("Apply Changes") { applyMoves(moves, displacing: displaced) }
         }
         .padding()
-        .background(Color.appDeep(accentColorHex))
+        .background(theme.deep)
         .clipShape(RoundedRectangle(cornerRadius: 18))
     }
 
@@ -326,13 +326,13 @@ struct AIInputView: View {
             }
             .padding()
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.white)
+            .background(theme.cardSurface)
             .clipShape(RoundedRectangle(cornerRadius: 14))
 
             confirmButton("Add All (\(drafts.count))") { insertDrafts(drafts) }
         }
         .padding()
-        .background(Color.appDeep(accentColorHex))
+        .background(theme.deep)
         .clipShape(RoundedRectangle(cornerRadius: 18))
     }
 
@@ -349,10 +349,10 @@ struct AIInputView: View {
                         Text(option).foregroundColor(.primary)
                         Spacer()
                         Image(systemName: "arrow.up.circle")
-                            .foregroundColor(.appAccent(accentColorHex))
+                            .foregroundColor(theme.accent)
                     }
                     .padding()
-                    .background(Color.white)
+                    .background(theme.cardSurface)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
             }
@@ -362,7 +362,7 @@ struct AIInputView: View {
                 .foregroundColor(.secondary)
         }
         .padding()
-        .background(Color.appDeep(accentColorHex))
+        .background(theme.deep)
         .clipShape(RoundedRectangle(cornerRadius: 18))
     }
 
@@ -370,7 +370,7 @@ struct AIInputView: View {
         Button(title, action: action)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 13)
-            .background(Color.appAccent(accentColorHex))
+            .background(theme.accentGradient)
             .foregroundColor(.white)
             .font(.subheadline.weight(.semibold))
             .clipShape(RoundedRectangle(cornerRadius: 14))
@@ -385,15 +385,15 @@ struct AIInputView: View {
     private func slotLabel(start: Date, end: Date) -> some View {
         HStack {
             Image(systemName: "clock")
-                .foregroundColor(.appAccent(accentColorHex))
+                .foregroundColor(theme.accent)
             Text(formatSlot(start: start, end: end))
                 .foregroundColor(.primary)
             Spacer()
             Image(systemName: "plus.circle.fill")
-                .foregroundColor(.appAccent(accentColorHex))
+                .foregroundColor(theme.accent)
         }
         .padding()
-        .background(Color.white)
+        .background(theme.cardSurface)
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
@@ -401,7 +401,7 @@ struct AIInputView: View {
 
     private var loadingView: some View {
         VStack(spacing: 12) {
-            ProgressView().tint(.appAccent(accentColorHex)).scaleEffect(1.4)
+            ProgressView().tint(theme.accent).scaleEffect(1.4)
             Text("Thinking…")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
@@ -414,7 +414,7 @@ struct AIInputView: View {
         VStack(spacing: 14) {
             Image(systemName: "sparkles")
                 .font(.system(size: 40))
-                .foregroundColor(.accentLight(accentColorHex))
+                .foregroundColor(theme.light)
             Text("Your scheduling secretary: add, move, or reorganize events, or plan whole goals — in plain language.")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
@@ -557,7 +557,7 @@ struct AIInputView: View {
 /// Tappable example prompts that fill the input field — teaches the box's
 /// range (ai-planner.md §8) without a manual.
 private struct FlowChips: View {
-    @AppStorage("accentColorHex") private var accentColorHex = "#E8784D"
+    @Environment(\.theme) private var theme
     let items: [String]
     let onTap: (String) -> Void
 
@@ -567,9 +567,9 @@ private struct FlowChips: View {
                 Button { onTap(item) } label: {
                     Text("“\(item)”")
                         .font(.caption)
-                        .foregroundColor(.appAccent(accentColorHex))
+                        .foregroundColor(theme.accent)
                         .padding(.horizontal, 12).padding(.vertical, 7)
-                        .background(Color.white)
+                        .background(theme.cardSurface)
                         .clipShape(Capsule())
                         .shadow(color: .black.opacity(0.04), radius: 3, y: 1)
                 }

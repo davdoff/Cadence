@@ -2,7 +2,7 @@ import SwiftUI
 
 struct AddMealView: View {
     @Environment(\.dismiss) private var dismiss
-    @AppStorage("accentColorHex") private var accentColorHex = "#E8784D"
+    @Environment(\.theme) private var theme
 
     @State private var name = ""
     @State private var prepMinutes = 20
@@ -12,7 +12,7 @@ struct AddMealView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.appBackground(accentColorHex).ignoresSafeArea()
+                theme.backgroundGradient.ignoresSafeArea()
                 Form {
                     Section("Meal Details") {
                         TextField("Name", text: $name)
@@ -23,7 +23,7 @@ struct AddMealView: View {
             }
             .navigationTitle("Add Meal")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(Color.appBackground(accentColorHex), for: .navigationBar)
+            .toolbarBackground(theme.background, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -36,7 +36,7 @@ struct AddMealView: View {
                         dismiss()
                     }
                     .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
-                    .tint(Color(hex: accentColorHex))
+                    .tint(theme.accent)
                 }
             }
         }

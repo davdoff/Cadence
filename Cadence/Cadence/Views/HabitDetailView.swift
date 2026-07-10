@@ -3,7 +3,7 @@ import SwiftData
 import Charts
 
 struct HabitDetailView: View {
-    @AppStorage("accentColorHex") private var accentColorHex = "#E8784D"
+    @Environment(\.theme) private var theme
     let habit: Habit
     @Environment(\.modelContext) private var context
 
@@ -16,7 +16,7 @@ struct HabitDetailView: View {
 
     var body: some View {
         ZStack {
-            Color.appBackground(accentColorHex).ignoresSafeArea()
+            theme.backgroundGradient.ignoresSafeArea()
             ScrollView {
                 VStack(spacing: 16) {
                     todayCard
@@ -30,7 +30,7 @@ struct HabitDetailView: View {
         }
         .navigationTitle(habit.name)
         .navigationBarTitleDisplayMode(.large)
-        .toolbarBackground(Color.appBackground(accentColorHex), for: .navigationBar)
+        .toolbarBackground(theme.background, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 ZStack {
@@ -105,9 +105,12 @@ struct HabitDetailView: View {
                     }
                     GeometryReader { geo in
                         ZStack(alignment: .leading) {
-                            RoundedRectangle(cornerRadius: 4).fill(Color.appDeep(accentColorHex))
+                            RoundedRectangle(cornerRadius: 4).fill(theme.deep)
                             RoundedRectangle(cornerRadius: 4)
-                                .fill(done ? Color.green : accent)
+                                .fill(done
+                                      ? AnyShapeStyle(Color.green)
+                                      : AnyShapeStyle(LinearGradient(colors: [accent.opacity(0.55), accent],
+                                                                     startPoint: .leading, endPoint: .trailing)))
                                 .frame(width: geo.size.width * prog)
                                 .animation(.easeOut(duration: 0.3), value: prog)
                         }
@@ -139,7 +142,7 @@ struct HabitDetailView: View {
             }
         }
         .padding()
-        .background(Color.white)
+        .background(theme.cardSurface)
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .shadow(color: accent.opacity(0.08), radius: 6, y: 2)
     }
@@ -174,9 +177,12 @@ struct HabitDetailView: View {
 
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 5).fill(Color.appDeep(accentColorHex))
+                    RoundedRectangle(cornerRadius: 5).fill(theme.deep)
                     RoundedRectangle(cornerRadius: 5)
-                        .fill(done ? Color.green : accent)
+                        .fill(done
+                                      ? AnyShapeStyle(Color.green)
+                                      : AnyShapeStyle(LinearGradient(colors: [accent.opacity(0.55), accent],
+                                                                     startPoint: .leading, endPoint: .trailing)))
                         .frame(width: geo.size.width * prog)
                         .animation(.easeOut(duration: 0.4), value: prog)
                 }
@@ -188,7 +194,7 @@ struct HabitDetailView: View {
                 .opacity(done ? 0 : 1)
         }
         .padding()
-        .background(Color.white)
+        .background(theme.cardSurface)
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .shadow(color: accent.opacity(0.08), radius: 6, y: 2)
     }
@@ -235,9 +241,7 @@ struct HabitDetailView: View {
             .frame(height: 140)
         }
         .padding()
-        .background(Color.white)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: .black.opacity(0.04), radius: 6, y: 2)
+        .cardStyle()
     }
 
     // MARK: - Insights card
@@ -278,9 +282,7 @@ struct HabitDetailView: View {
             }
         }
         .padding()
-        .background(Color.white)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: .black.opacity(0.04), radius: 6, y: 2)
+        .cardStyle()
     }
 
     // MARK: - AI analysis card
@@ -315,9 +317,7 @@ struct HabitDetailView: View {
             }
         }
         .padding()
-        .background(Color.white)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: .black.opacity(0.04), radius: 6, y: 2)
+        .cardStyle()
     }
 
     // MARK: - Helpers

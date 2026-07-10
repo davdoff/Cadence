@@ -4,8 +4,10 @@ import SwiftData
 struct EventDetailView: View {
     let event: Event
     @Environment(\.modelContext) private var context
-    @AppStorage("accentColorHex") private var accentColorHex = "#E8784D"
+    @Environment(\.theme) private var theme
     @Query private var habits: [Habit]
+
+    @State private var showingEdit = false
 
     private var dateString: String {
         let f = DateFormatter()
@@ -21,7 +23,7 @@ struct EventDetailView: View {
 
     var body: some View {
         ZStack {
-            Color.appBackground(accentColorHex).ignoresSafeArea()
+            theme.backgroundGradient.ignoresSafeArea()
             VStack(alignment: .leading, spacing: 12) {
                 // Title card
                 HStack(spacing: 14) {
@@ -44,9 +46,7 @@ struct EventDetailView: View {
                     Spacer()
                 }
                 .padding(16)
-                .background(Color.white)
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-                .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
+                .cardStyle()
 
                 // Status card
                 HStack {
@@ -57,9 +57,7 @@ struct EventDetailView: View {
                 }
                 .font(.subheadline)
                 .padding(16)
-                .background(Color.white)
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-                .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
+                .cardStyle()
 
                 if let cat = event.category {
                     HStack {
@@ -76,9 +74,7 @@ struct EventDetailView: View {
                     }
                     .font(.subheadline)
                     .padding(16)
-                    .background(Color.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-                    .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
+                    .cardStyle()
                 }
 
                 if event.status == .pending {
@@ -91,7 +87,19 @@ struct EventDetailView: View {
         }
         .navigationTitle(event.title)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(Color.appBackground(accentColorHex), for: .navigationBar)
+        .toolbarBackground(theme.background, for: .navigationBar)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button { showingEdit = true } label: {
+                    Image(systemName: "pencil")
+                        .foregroundColor(theme.accent)
+                }
+                .accessibilityLabel("Edit event")
+            }
+        }
+        .sheet(isPresented: $showingEdit) {
+            AddEventView(editingEvent: event)
+        }
     }
 
     // MARK: - Mark actions
@@ -149,7 +157,7 @@ struct EventDetailView: View {
         if let hex = event.category?.colorHex {
             return Color(hex: hex)
         }
-        return .accentLight(accentColorHex)
+        return theme.light
     }
 
     @ViewBuilder
@@ -169,7 +177,7 @@ struct EventDetailView: View {
                 .fontWeight(.semibold)
         case .pending:
             Label("Upcoming", systemImage: "clock.fill")
-                .foregroundColor(Color(hex: accentColorHex))
+                .foregroundColor(theme.accent)
                 .fontWeight(.semibold)
         }
     }

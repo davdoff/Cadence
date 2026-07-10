@@ -8,7 +8,7 @@ import EventKit
 struct CalendarImportView: View {
     @Environment(\.modelContext) private var context
     @Query(sort: \CalendarImportSource.displayName) private var sources: [CalendarImportSource]
-    @AppStorage("accentColorHex") private var accentColorHex = "#E8784D"
+    @Environment(\.theme) private var theme
 
     @State private var authStatus = EKEventStore.authorizationStatus(for: .event)
     @State private var isSyncing = false
@@ -35,7 +35,7 @@ struct CalendarImportView: View {
 
     var body: some View {
         ZStack {
-            Color.appBackground(accentColorHex).ignoresSafeArea()
+            theme.backgroundGradient.ignoresSafeArea()
             List {
                 connectedSection
                 addSection
@@ -47,7 +47,7 @@ struct CalendarImportView: View {
         }
         .navigationTitle("Import Calendars")
         .navigationBarTitleDisplayMode(.large)
-        .toolbarBackground(Color.appBackground(accentColorHex), for: .navigationBar)
+        .toolbarBackground(theme.background, for: .navigationBar)
         .onAppear { authStatus = EKEventStore.authorizationStatus(for: .event) }
         .alert(
             "Remove \(sourceToRemove?.displayName ?? "calendar")?",
@@ -113,7 +113,7 @@ struct CalendarImportView: View {
                 Button("Add") { addFeed() }
                     .buttonStyle(.borderless) // keep the row's TextField tappable
                     .disabled(isAddingFeed || feedURLText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    .foregroundColor(.appAccent(accentColorHex))
+                    .foregroundColor(theme.accent)
             }
         } header: {
             Text("Calendar links")
@@ -132,7 +132,7 @@ struct CalendarImportView: View {
                 } label: {
                     HStack {
                         Label("Sync now", systemImage: "arrow.clockwise")
-                            .foregroundColor(.appAccent(accentColorHex))
+                            .foregroundColor(theme.accent)
                         Spacer()
                         if isSyncing { ProgressView() }
                     }
@@ -160,7 +160,7 @@ struct CalendarImportView: View {
                 }
             }
         }
-        .tint(Color(hex: accentColorHex))
+        .tint(theme.accent)
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button(role: .destructive) {
                 sourceToRemove = source
@@ -203,7 +203,7 @@ struct CalendarImportView: View {
                     }
                 } label: {
                     Label("Connect device calendars", systemImage: "calendar.badge.plus")
-                        .foregroundColor(.appAccent(accentColorHex))
+                        .foregroundColor(theme.accent)
                 }
             } footer: {
                 Text("Cadence reads your existing calendars so it can schedule around your commitments. You choose which calendars to import.")
@@ -218,7 +218,7 @@ struct CalendarImportView: View {
                     }
                 } label: {
                     Label("Open Settings", systemImage: "gear")
-                        .foregroundColor(.appAccent(accentColorHex))
+                        .foregroundColor(theme.accent)
                 }
             } footer: {
                 Text("Cadence needs full calendar access to read events. Allow it under Settings → Apps → Cadence → Calendars.")
@@ -243,7 +243,7 @@ struct CalendarImportView: View {
             }
             Spacer()
             Image(systemName: "plus.circle.fill")
-                .foregroundColor(.appAccent(accentColorHex))
+                .foregroundColor(theme.accent)
         }
     }
 

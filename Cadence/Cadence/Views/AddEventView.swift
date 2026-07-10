@@ -2,7 +2,7 @@ import SwiftUI
 import SwiftData
 
 struct AddEventView: View {
-    @AppStorage("accentColorHex") private var accentColorHex = "#E8784D"
+    @Environment(\.theme) private var theme
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
 
@@ -12,6 +12,12 @@ struct AddEventView: View {
 
     var prefillTitle: String = ""
     var editingEvent: Event? = nil
+    /// Pre-selects this day for new events (e.g. the day picked in ScheduleView).
+    var initialDate: Date? = nil
+    /// Missed-tray reschedule: prefills title/category/times from this event
+    /// and deletes it only when the replacement is saved — cancelling the
+    /// sheet keeps the original (UI_REVIEW §1.2).
+    var reschedulingSource: Event? = nil
 
     @State private var title = ""
     @State private var selectedDate = Date.now
@@ -24,16 +30,21 @@ struct AddEventView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.appBackground(accentColorHex).ignoresSafeArea()
+                theme.backgroundGradient.ignoresSafeArea()
                 Form {
                     Section("Details") {
                         TextField("Event title", text: $title)
                         DatePicker("Date", selection: $selectedDate, displayedComponents: .date)
-                            .tint(.appAccent(accentColorHex))
+                            .tint(theme.accent)
                         DatePicker("Starts", selection: $startTime, displayedComponents: .hourAndMinute)
-                            .tint(.appAccent(accentColorHex))
+                            .tint(theme.accent)
                         DatePicker("Ends", selection: $endTime, displayedComponents: .hourAndMinute)
-                            .tint(.appAccent(accentColorHex))
+                            .tint(theme.accent)
+                        if !isTimeRangeValid {
+                            Label("End time must be after start time.", systemImage: "exclamationmark.triangle.fill")
+                                .font(.caption)
+                                .foregroundColor(.red)
+                        }
                     }
 
                     Section("Category") {
@@ -50,7 +61,7 @@ struct AddEventView: View {
                                     Spacer()
                                     if selectedCategory?.id == cat.id {
                                         Image(systemName: "checkmark")
-                                            .foregroundColor(.appAccent(accentColorHex))
+                                            .foregroundColor(theme.accent)
                                     }
                                 }
                             }
@@ -64,12 +75,12 @@ struct AddEventView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
-                        .foregroundColor(.appAccent(accentColorHex))
+                        .foregroundColor(theme.accent)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") { attemptSave() }
-                        .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
-                        .foregroundColor(title.trimmingCharacters(in: .whitespaces).isEmpty ? .secondary : .appAccent(accentColorHex))
+                        .disabled(!canSave)
+                        .foregroundColor(canSave ? theme.accent : .secondary)
                 }
             }
             .alert("Scheduling Conflict", isPresented: $showConflictAlert) {
@@ -85,8 +96,14 @@ struct AddEventView: View {
                     startTime = ev.startTime
                     endTime = ev.endTime
                     selectedCategory = ev.category
-                } else if !prefillTitle.isEmpty {
-                    title = prefillTitle
+                } else if let src = reschedulingSource {
+                    title = src.title
+                    selectedCategory = src.category
+                    startTime = src.startTime
+                    endTime = src.endTime
+                } else {
+                    if !prefillTitle.isEmpty { title = prefillTitle }
+                    if let initialDate { selectedDate = initialDate }
                 }
             }
         }
@@ -97,6 +114,14 @@ struct AddEventView: View {
     private var combinedStart: Date { combine(time: startTime, with: selectedDate) }
     private var combinedEnd: Date   { combine(time: endTime,   with: selectedDate) }
 
+    /// DateInterval traps on a negative duration — never build one from an
+    /// inverted range (UI_REVIEW §1.1).
+    private var isTimeRangeValid: Bool { combinedEnd > combinedStart }
+
+    private var canSave: Bool {
+        !title.trimmingCharacters(in: .whitespaces).isEmpty && isTimeRangeValid
+    }
+
     private func combine(time: Date, with date: Date) -> Date {
         let cal   = Calendar.current
         let comps = cal.dateComponents([.hour, .minute], from: time)
@@ -104,10 +129,12 @@ struct AddEventView: View {
     }
 
     private func attemptSave() {
+        guard isTimeRangeValid else { return }
         let prefs    = prefsResults.first ?? UserPreferences()
         let proposal = DateInterval(start: combinedStart, end: combinedEnd)
-        // Exclude the event being edited from conflict check
-        let others   = editingEvent.map { ev in allEvents.filter { $0.id != ev.id } } ?? allEvents
+        // Exclude the event being edited/replaced from the conflict check
+        let excludedID = editingEvent?.id ?? reschedulingSource?.id
+        let others   = excludedID.map { id in allEvents.filter { $0.id != id } } ?? allEvents
         let hits     = SchedulerService().conflicts(for: proposal, in: others, bufferMinutes: prefs.bufferMinutes)
 
         if hits.isEmpty {
@@ -134,6 +161,13 @@ struct AddEventView: View {
             )
             svc.scheduleEventStartAlert(for: event, reminderMinutes: prefs.defaultReminderMinutes)
             svc.scheduleMissedEventAlert(for: event)
+        }
+        // The replacement is saved — now it's safe to drop the missed original.
+        if let src = reschedulingSource {
+            svc.cancelEventNotifications(for: src)
+            // Imported events: tombstone so the next sync doesn't re-insert it.
+            CalendarImportService.shared.noteLocalDeletion(of: src, context: context)
+            context.delete(src)
         }
         try? context.save()
         WidgetSync.refresh()

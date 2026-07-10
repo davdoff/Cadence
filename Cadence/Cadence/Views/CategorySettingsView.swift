@@ -2,7 +2,7 @@ import SwiftUI
 import SwiftData
 
 struct CategorySettingsView: View {
-    @AppStorage("accentColorHex") private var accentColorHex = "#E8784D"
+    @Environment(\.theme) private var theme
     @Query(sort: \Category.name) private var categories: [Category]
     @Environment(\.modelContext) private var context
 
@@ -10,7 +10,7 @@ struct CategorySettingsView: View {
 
     var body: some View {
         ZStack {
-            Color.appBackground(accentColorHex).ignoresSafeArea()
+            theme.backgroundGradient.ignoresSafeArea()
 
             List {
                 ForEach(categories) { cat in
@@ -19,7 +19,7 @@ struct CategorySettingsView: View {
                     } label: {
                         CategoryRow(category: cat)
                     }
-                    .listRowBackground(Color.white)
+                    .listRowBackground(theme.cardSurface)
                 }
                 .onDelete { offsets in
                     for i in offsets { context.delete(categories[i]) }
@@ -32,11 +32,11 @@ struct CategorySettingsView: View {
         }
         .navigationTitle("Categories")
         .navigationBarTitleDisplayMode(.large)
-        .toolbarBackground(Color.appBackground(accentColorHex), for: .navigationBar)
+        .toolbarBackground(theme.background, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button { showingAdd = true } label: {
-                    Image(systemName: "plus").foregroundColor(.appAccent(accentColorHex))
+                    Image(systemName: "plus").foregroundColor(theme.accent)
                 }
             }
         }
@@ -69,7 +69,7 @@ private struct CategoryRow: View {
 // MARK: - Add Category
 
 struct AddCategoryView: View {
-    @AppStorage("accentColorHex") private var accentColorHex = "#E8784D"
+    @Environment(\.theme) private var theme
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
 
@@ -86,7 +86,7 @@ struct AddCategoryView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.appBackground(accentColorHex).ignoresSafeArea()
+                theme.backgroundGradient.ignoresSafeArea()
                 VStack(spacing: 20) {
                     // Preview
                     HStack(spacing: 12) {
@@ -99,18 +99,14 @@ struct AddCategoryView: View {
                         Spacer()
                     }
                     .padding()
-                    .background(Color.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 14))
-                    .shadow(color: .black.opacity(0.04), radius: 5, y: 2)
+                    .cardStyle()
 
                     // Name
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Name").font(.caption.weight(.semibold)).foregroundColor(.secondary).textCase(.uppercase)
                         TextField("e.g. Work, Study, Health", text: $name)
                             .padding()
-                            .background(Color.white)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                            .shadow(color: .black.opacity(0.03), radius: 4, y: 2)
+                            .cardStyle()
                     }
 
                     // Color
@@ -134,9 +130,7 @@ struct AddCategoryView: View {
                             }
                         }
                         .padding()
-                        .background(Color.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .shadow(color: .black.opacity(0.03), radius: 4, y: 2)
+                        .cardStyle()
                     }
 
                     Spacer()
@@ -147,12 +141,12 @@ struct AddCategoryView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }.foregroundColor(.appAccent(accentColorHex))
+                    Button("Cancel") { dismiss() }.foregroundColor(theme.accent)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add") { save() }
                         .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
-                        .foregroundColor(.appAccent(accentColorHex))
+                        .foregroundColor(theme.accent)
                 }
             }
         }
@@ -171,7 +165,7 @@ struct AddCategoryView: View {
 // MARK: - Edit Category
 
 struct EditCategoryView: View {
-    @AppStorage("accentColorHex") private var accentColorHex = "#E8784D"
+    @Environment(\.theme) private var theme
     let category: Category
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
@@ -189,7 +183,7 @@ struct EditCategoryView: View {
 
     var body: some View {
         ZStack {
-            Color.appBackground(accentColorHex).ignoresSafeArea()
+            theme.backgroundGradient.ignoresSafeArea()
             VStack(spacing: 20) {
                 // Preview
                 HStack(spacing: 12) {
@@ -200,16 +194,14 @@ struct EditCategoryView: View {
                     Spacer()
                 }
                 .padding()
-                .background(Color.white)
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-                .shadow(color: .black.opacity(0.04), radius: 5, y: 2)
+                .cardStyle()
 
                 // Name
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Name").font(.caption.weight(.semibold)).foregroundColor(.secondary).textCase(.uppercase)
                     TextField("Category name", text: $name)
                         .padding()
-                        .background(Color.white)
+                        .background(theme.cardSurface)
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
 
@@ -234,7 +226,7 @@ struct EditCategoryView: View {
                         }
                     }
                     .padding()
-                    .background(Color.white)
+                    .background(theme.cardSurface)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
 
@@ -244,12 +236,12 @@ struct EditCategoryView: View {
         }
         .navigationTitle("Edit Category")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(Color.appBackground(accentColorHex), for: .navigationBar)
+        .toolbarBackground(theme.background, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Save") { save() }
                     .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
-                    .foregroundColor(.appAccent(accentColorHex))
+                    .foregroundColor(theme.accent)
             }
         }
     }

@@ -2,12 +2,11 @@ import SwiftUI
 import SwiftData
 
 struct MissedEventsView: View {
-    @AppStorage("accentColorHex") private var accentColorHex = "#E8784D"
+    @Environment(\.theme) private var theme
     @Environment(\.modelContext) private var context
     @Query(sort: \Event.startTime, order: .reverse) private var allEvents: [Event]
 
-    @State private var rescheduleTitle = ""
-    @State private var showingReschedule = false
+    @State private var reschedulingEvent: Event?
 
     private var missedEvents: [Event] {
         allEvents.filter { $0.status == .missed }
@@ -21,7 +20,7 @@ struct MissedEventsView: View {
 
     var body: some View {
         ZStack {
-            Color.appBackground(accentColorHex).ignoresSafeArea()
+            theme.backgroundGradient.ignoresSafeArea()
 
             if missedEvents.isEmpty && displacedEvents.isEmpty {
                 emptyState
@@ -31,9 +30,11 @@ struct MissedEventsView: View {
         }
         .navigationTitle("Missed")
         .navigationBarTitleDisplayMode(.large)
-        .toolbarBackground(Color.appBackground(accentColorHex), for: .navigationBar)
-        .sheet(isPresented: $showingReschedule) {
-            AddEventView(prefillTitle: rescheduleTitle)
+        .toolbarBackground(theme.background, for: .navigationBar)
+        // The original stays put until the replacement is saved — cancelling
+        // the sheet loses nothing (UI_REVIEW §1.2).
+        .sheet(item: $reschedulingEvent) { event in
+            AddEventView(reschedulingSource: event)
         }
     }
 
@@ -43,7 +44,7 @@ struct MissedEventsView: View {
         VStack(spacing: 14) {
             Image(systemName: "checkmark.seal.fill")
                 .font(.system(size: 52))
-                .foregroundColor(.accentLight(accentColorHex))
+                .foregroundColor(theme.light)
             Text("Nothing missed")
                 .font(.headline)
                 .foregroundColor(.secondary)
@@ -84,16 +85,16 @@ struct MissedEventsView: View {
 
     private func eventRow(_ event: Event) -> some View {
         EventRowView(event: event)
-            .listRowBackground(Color.appBackground(accentColorHex))
+            .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
             .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
             .swipeActions(edge: .leading, allowsFullSwipe: true) {
                 Button {
-                    reschedule(event)
+                    reschedulingEvent = event
                 } label: {
                     Label("Reschedule", systemImage: "arrow.clockwise")
                 }
-                .tint(.appAccent(accentColorHex))
+                .tint(theme.accent)
             }
             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                 Button(role: .destructive) {
@@ -106,18 +107,5 @@ struct MissedEventsView: View {
                     Label("Delete", systemImage: "trash")
                 }
             }
-    }
-
-    // MARK: - Actions
-
-    private func reschedule(_ event: Event) {
-        rescheduleTitle = event.title
-        // Rescheduling replaces the event — tombstone imported ones so the
-        // next sync doesn't bring back the original alongside the new copy.
-        CalendarImportService.shared.noteLocalDeletion(of: event, context: context)
-        context.delete(event)
-        try? context.save()
-        WidgetSync.refresh()
-        showingReschedule = true
     }
 }

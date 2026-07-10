@@ -9,7 +9,7 @@ import SwiftData
 /// The sheet only collects input and fetches the plan; the confirm/insert
 /// step stays in AIInputView's generate card, so nothing is written from here.
 struct GeneratePlanSheet: View {
-    @AppStorage("accentColorHex") private var accentColorHex = "#E8784D"
+    @Environment(\.theme) private var theme
     @Environment(\.dismiss) private var dismiss
 
     @Query(sort: \Event.startTime) private var allEvents: [Event]
@@ -52,7 +52,7 @@ struct GeneratePlanSheet: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.appBackground(accentColorHex).ignoresSafeArea()
+                theme.backgroundGradient.ignoresSafeArea()
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
                         quickRangeRow
@@ -76,7 +76,7 @@ struct GeneratePlanSheet: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
-                        .foregroundColor(.appAccent(accentColorHex))
+                        .foregroundColor(theme.accent)
                 }
             }
         }
@@ -94,9 +94,9 @@ struct GeneratePlanSheet: View {
                     } label: {
                         Text(range.label)
                             .font(.caption.weight(.semibold))
-                            .foregroundColor(isSelected(range) ? .white : .appAccent(accentColorHex))
+                            .foregroundColor(isSelected(range) ? .white : theme.accent)
                             .padding(.horizontal, 12).padding(.vertical, 7)
-                            .background(isSelected(range) ? Color.appAccent(accentColorHex) : Color.white)
+                            .background(isSelected(range) ? AnyShapeStyle(theme.accentGradient) : AnyShapeStyle(theme.cardSurface))
                             .clipShape(Capsule())
                             .shadow(color: .black.opacity(0.04), radius: 3, y: 1)
                     }
@@ -117,9 +117,7 @@ struct GeneratePlanSheet: View {
             DatePicker("To", selection: $endDate, in: startDate..., displayedComponents: [.date])
         }
         .padding()
-        .background(Color.white)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
+        .cardStyle()
     }
 
     private var goalsCard: some View {
@@ -132,9 +130,7 @@ struct GeneratePlanSheet: View {
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
+        .cardStyle()
     }
 
     private var generateButton: some View {
@@ -151,7 +147,7 @@ struct GeneratePlanSheet: View {
                     .padding(.vertical, 13)
             }
         }
-        .background(canSubmit ? Color.appAccent(accentColorHex) : Color.accentLight(accentColorHex))
+        .background(canSubmit ? AnyShapeStyle(theme.accentGradient) : AnyShapeStyle(theme.light))
         .foregroundColor(.white)
         .font(.subheadline.weight(.semibold))
         .clipShape(RoundedRectangle(cornerRadius: 14))

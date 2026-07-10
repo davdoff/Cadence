@@ -2,7 +2,7 @@ import SwiftUI
 import SwiftData
 
 struct AddHabitView: View {
-    @AppStorage("accentColorHex") private var accentColorHex = "#E8784D"
+    @Environment(\.theme) private var theme
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
     @Query private var categories: [Category]
@@ -21,7 +21,7 @@ struct AddHabitView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color.appBackground(accentColorHex).ignoresSafeArea()
+                theme.backgroundGradient.ignoresSafeArea()
                 ScrollView {
                     VStack(spacing: 20) {
                         previewCard
@@ -81,7 +81,7 @@ struct AddHabitView: View {
                 .foregroundColor(accent)
         }
         .padding(16)
-        .background(Color.white)
+        .background(theme.cardSurface)
         .clipShape(RoundedRectangle(cornerRadius: 18))
         .shadow(color: accent.opacity(0.12), radius: 8, y: 3)
     }
@@ -145,7 +145,7 @@ struct AddHabitView: View {
                 TextField("Habit name", text: $name)
                     .padding(.vertical, 10)
 
-                Divider().overlay(Color.appDeep(accentColorHex))
+                Divider().overlay(theme.deep)
 
                 Picker("Type", selection: $type) {
                     Label("Build it", systemImage: "arrow.up.circle.fill").tag(HabitType.good)
@@ -182,7 +182,7 @@ struct AddHabitView: View {
                     }
                     .padding(.vertical, 10)
 
-                    Divider().overlay(Color.appDeep(accentColorHex))
+                    Divider().overlay(theme.deep)
 
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
@@ -235,9 +235,7 @@ struct AddHabitView: View {
                 .padding(.leading, 2)
             content()
                 .padding()
-                .background(Color.white)
-                .clipShape(RoundedRectangle(cornerRadius: 16))
-                .shadow(color: .black.opacity(0.04), radius: 5, y: 2)
+                .cardStyle()
         }
     }
 

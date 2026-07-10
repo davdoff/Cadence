@@ -4,12 +4,13 @@ import SwiftData
 // MARK: - HabitsView
 
 struct HabitsView: View {
-    @AppStorage("accentColorHex") private var accentColorHex = "#E8784D"
+    @Environment(\.theme) private var theme
     @Query private var habits: [Habit]
     @Environment(\.modelContext) private var context
 
     @State private var showingAddHabit = false
     @State private var selectedHabit: Habit?
+    @State private var habitToDelete: Habit?
     @State private var filter: HabitFilter = .all
     @State private var sort: HabitSort = .streak
     @AppStorage("habitCompact") private var compact = false
@@ -47,7 +48,7 @@ struct HabitsView: View {
 
     var body: some View {
         ZStack {
-            Color.appBackground(accentColorHex).ignoresSafeArea()
+            theme.backgroundGradient.ignoresSafeArea()
             if habits.isEmpty {
                 emptyState
             } else {
@@ -65,24 +66,43 @@ struct HabitsView: View {
         }
         .navigationTitle("Habits")
         .navigationBarTitleDisplayMode(.large)
-        .toolbarBackground(Color.appBackground(accentColorHex), for: .navigationBar)
+        .toolbarBackground(theme.background, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button {
                     withAnimation(.spring(duration: 0.25)) { compact.toggle() }
                 } label: {
                     Image(systemName: compact ? "rectangle.grid.1x2.fill" : "square.grid.2x2.fill")
-                        .foregroundColor(.appAccent(accentColorHex))
+                        .foregroundColor(theme.accent)
                 }
             }
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button { showingAddHabit = true } label: {
-                    Image(systemName: "plus").foregroundColor(.appAccent(accentColorHex))
+                    Image(systemName: "plus").foregroundColor(theme.accent)
                 }
             }
         }
         .sheet(isPresented: $showingAddHabit) { AddHabitView() }
         .navigationDestination(item: $selectedHabit) { HabitDetailView(habit: $0) }
+        .alert(
+            "Delete \(habitToDelete?.name ?? "habit")?",
+            isPresented: Binding(
+                get: { habitToDelete != nil },
+                set: { if !$0 { habitToDelete = nil } }
+            )
+        ) {
+            Button("Delete", role: .destructive) {
+                if let habit = habitToDelete {
+                    context.delete(habit)
+                    try? context.save()
+                    WidgetSync.refresh()
+                }
+                habitToDelete = nil
+            }
+            Button("Cancel", role: .cancel) { habitToDelete = nil }
+        } message: {
+            Text("This permanently deletes the habit and its full history.")
+        }
     }
 
     // MARK: - Summary card
@@ -92,39 +112,36 @@ struct HabitsView: View {
             VStack(spacing: 8) {
                 ZStack {
                     Circle()
-                        .stroke(Color.appDeep(accentColorHex), lineWidth: 9)
+                        .stroke(theme.deep, lineWidth: 9)
                     Circle()
                         .trim(from: 0, to: overallRate)
                         .stroke(
-                            LinearGradient(
-                                colors: [.accentLight(accentColorHex), .appAccent(accentColorHex)],
-                                startPoint: .topLeading, endPoint: .bottomTrailing
-                            ),
+                            theme.accentGradient,
                             style: StrokeStyle(lineWidth: 9, lineCap: .round)
                         )
                         .rotationEffect(.degrees(-90))
                         .animation(.spring(duration: 0.5), value: overallRate)
                     Text("\(Int(overallRate * 100))%")
                         .font(.system(size: 14, weight: .bold))
-                        .foregroundColor(.appAccent(accentColorHex))
+                        .foregroundColor(theme.accent)
                 }
                 .frame(width: 64, height: 64)
                 Text("Daily goal").font(.caption2).foregroundColor(.secondary)
             }
             .frame(maxWidth: .infinity)
 
-            Rectangle().fill(Color.appDeep(accentColorHex)).frame(width: 1, height: 52)
+            Rectangle().fill(theme.deep).frame(width: 1, height: 52)
 
             VStack(spacing: 4) {
                 Text("\(totalGoodToday)")
                     .font(.system(size: 32, weight: .bold, design: .rounded))
-                    .foregroundColor(.appAccent(accentColorHex))
+                    .foregroundColor(theme.accent)
                     .contentTransition(.numericText())
                 Text("good logged").font(.caption2).foregroundColor(.secondary)
             }
             .frame(maxWidth: .infinity)
 
-            Rectangle().fill(Color.appDeep(accentColorHex)).frame(width: 1, height: 52)
+            Rectangle().fill(theme.deep).frame(width: 1, height: 52)
 
             VStack(spacing: 4) {
                 Text("\(totalBadToday)")
@@ -136,9 +153,7 @@ struct HabitsView: View {
             .frame(maxWidth: .infinity)
         }
         .padding(.vertical, 18)
-        .background(Color.white)
-        .clipShape(RoundedRectangle(cornerRadius: 18))
-        .shadow(color: .black.opacity(0.05), radius: 6, y: 2)
+        .cardStyle(prominent: true)
     }
 
     // MARK: - Controls
@@ -154,13 +169,13 @@ struct HabitsView: View {
                         Text(f.rawValue)
                             .font(.caption.weight(.semibold))
                             .padding(.horizontal, 10).padding(.vertical, 6)
-                            .background(filter == f ? Color.appAccent(accentColorHex) : Color.clear)
+                            .background(filter == f ? AnyShapeStyle(theme.accentGradient) : AnyShapeStyle(Color.clear))
                             .foregroundColor(filter == f ? .white : .secondary)
                     }
                     .buttonStyle(.plain)
                 }
             }
-            .background(Color.appDeep(accentColorHex))
+            .background(theme.deep)
             .clipShape(Capsule())
 
             Spacer()
@@ -180,9 +195,9 @@ struct HabitsView: View {
                     Text(sort.rawValue).font(.caption.weight(.semibold))
                     Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
                 }
-                .foregroundColor(.appAccent(accentColorHex))
+                .foregroundColor(theme.accent)
                 .padding(.horizontal, 12).padding(.vertical, 7)
-                .background(Color.appDeep(accentColorHex))
+                .background(theme.deep)
                 .clipShape(Capsule())
             }
         }
@@ -203,9 +218,10 @@ struct HabitsView: View {
                     .contextMenu {
                         Button { selectedHabit = habit } label: { Label("View Details", systemImage: "chart.bar.fill") }
                         Divider()
+                        // Confirmed below — one stray tap must not destroy
+                        // the habit's full history (UI_REVIEW §2).
                         Button(role: .destructive) {
-                            context.delete(habit); try? context.save()
-                            WidgetSync.refresh()
+                            habitToDelete = habit
                         } label: { Label("Delete", systemImage: "trash") }
                     }
             }
@@ -218,11 +234,11 @@ struct HabitsView: View {
         VStack(spacing: 18) {
             ZStack {
                 Circle()
-                    .fill(Color.appAccent(accentColorHex).opacity(0.12))
+                    .fill(theme.accent.opacity(0.12))
                     .frame(width: 90, height: 90)
                 Image(systemName: "bolt.heart.fill")
                     .font(.system(size: 40))
-                    .foregroundColor(.appAccent(accentColorHex))
+                    .foregroundColor(theme.accent)
             }
             Text("No habits yet")
                 .font(.headline).foregroundColor(.secondary)
@@ -234,7 +250,7 @@ struct HabitsView: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundColor(.white)
                     .padding(.horizontal, 24).padding(.vertical, 12)
-                    .background(Color.appAccent(accentColorHex))
+                    .background(theme.accentGradient)
                     .clipShape(Capsule())
             }
         }
@@ -245,7 +261,7 @@ struct HabitsView: View {
 // MARK: - HabitCard
 
 struct HabitCard: View {
-    @AppStorage("accentColorHex") private var accentColorHex = "#E8784D"
+    @Environment(\.theme) private var theme
     let habit: Habit
     let compact: Bool
     let onDetail: () -> Void
@@ -273,7 +289,7 @@ struct HabitCard: View {
             }
         }
         .padding(compact ? 10 : 14)
-        .background(Color.white)
+        .background(theme.cardSurface)
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .shadow(color: accent.opacity(0.08), radius: 5, y: 2)
         .overlay(
@@ -363,9 +379,12 @@ struct HabitCard: View {
         VStack(alignment: .leading, spacing: 4) {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 4).fill(Color.appDeep(accentColorHex))
+                    RoundedRectangle(cornerRadius: 4).fill(theme.deep)
                     RoundedRectangle(cornerRadius: 4)
-                        .fill(dailyDone ? Color.green : accent)
+                        .fill(dailyDone
+                              ? AnyShapeStyle(Color.green)
+                              : AnyShapeStyle(LinearGradient(colors: [accent.opacity(0.55), accent],
+                                                             startPoint: .leading, endPoint: .trailing)))
                         .frame(width: geo.size.width * dailyProg)
                         .animation(.easeOut(duration: 0.3), value: dailyProg)
                 }
@@ -389,9 +408,12 @@ struct HabitCard: View {
         VStack(alignment: .leading, spacing: 4) {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 4).fill(Color.appDeep(accentColorHex))
+                    RoundedRectangle(cornerRadius: 4).fill(theme.deep)
                     RoundedRectangle(cornerRadius: 4)
-                        .fill(weeklyDone ? Color.green : accent.opacity(0.6))
+                        .fill(weeklyDone
+                              ? AnyShapeStyle(Color.green)
+                              : AnyShapeStyle(LinearGradient(colors: [accent.opacity(0.35), accent.opacity(0.7)],
+                                                             startPoint: .leading, endPoint: .trailing)))
                         .frame(width: geo.size.width * weeklyProg)
                         .animation(.easeOut(duration: 0.3), value: weeklyProg)
                 }

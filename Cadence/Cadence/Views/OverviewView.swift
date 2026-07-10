@@ -3,7 +3,7 @@ import SwiftData
 import Charts
 
 struct OverviewView: View {
-    @AppStorage("accentColorHex") private var accentColorHex = "#E8784D"
+    @Environment(\.theme) private var theme
     @Query(sort: \Event.startTime) private var allEvents: [Event]
     @Query private var habits: [Habit]
 
@@ -132,7 +132,7 @@ struct OverviewView: View {
 
     var body: some View {
         ZStack {
-            Color.appBackground(accentColorHex).ignoresSafeArea()
+            theme.backgroundGradient.ignoresSafeArea()
             ScrollView {
                 VStack(spacing: 20) {
                     periodPicker
@@ -160,7 +160,7 @@ struct OverviewView: View {
         }
         .navigationTitle("Overview")
         .navigationBarTitleDisplayMode(.large)
-        .toolbarBackground(Color.appBackground(accentColorHex), for: .navigationBar)
+        .toolbarBackground(theme.background, for: .navigationBar)
     }
 
     // MARK: - Period picker
@@ -179,18 +179,14 @@ struct OverviewView: View {
             ZStack {
                 // Background track
                 Circle()
-                    .stroke(Color.appDeep(accentColorHex), lineWidth: 18)
+                    .stroke(theme.deep, lineWidth: 18)
                     .frame(width: 170, height: 170)
 
                 // Fill arc
                 Circle()
                     .trim(from: 0, to: rate)
                     .stroke(
-                        LinearGradient(
-                            colors: [.accentLight(accentColorHex), .appAccent(accentColorHex), .accentDark(accentColorHex)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
+                        theme.accentGradient,
                         style: StrokeStyle(lineWidth: 18, lineCap: .round)
                     )
                     .frame(width: 170, height: 170)
@@ -201,7 +197,7 @@ struct OverviewView: View {
                 VStack(spacing: 2) {
                     Text("\(Int(rate * 100))%")
                         .font(.system(size: 42, weight: .bold, design: .rounded))
-                        .foregroundColor(.appAccent(accentColorHex))
+                        .foregroundColor(theme.accent)
                         .contentTransition(.numericText())
                         .animation(.spring(duration: 0.4), value: rate)
                     Text("completed")
@@ -222,15 +218,13 @@ struct OverviewView: View {
                     Text("·").foregroundColor(.secondary)
                     Label("\(perfectDaysThisPeriod) perfect day\(perfectDaysThisPeriod == 1 ? "" : "s")", systemImage: "star.fill")
                         .font(.caption.weight(.semibold))
-                        .foregroundColor(.appAccent(accentColorHex))
+                        .foregroundColor(theme.accent)
                 }
             }
         }
         .frame(maxWidth: .infinity)
         .padding(24)
-        .background(Color.white)
-        .clipShape(RoundedRectangle(cornerRadius: 22))
-        .shadow(color: .black.opacity(0.05), radius: 10, y: 4)
+        .cardStyle(prominent: true)
     }
 
     // MARK: - Stats chips
@@ -239,7 +233,7 @@ struct OverviewView: View {
         HStack(spacing: 12) {
             statChip(value: completed, label: "Completed", icon: "checkmark.circle.fill", color: .green)
             statChip(value: missed,    label: "Missed",    icon: "xmark.circle.fill",     color: .red.opacity(0.7))
-            statChip(value: upcoming,  label: "Coming up", icon: "clock.fill",            color: .accentLight(accentColorHex))
+            statChip(value: upcoming,  label: "Coming up", icon: "clock.fill",            color: theme.light)
         }
     }
 
@@ -260,9 +254,7 @@ struct OverviewView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 14)
-        .background(Color.white)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
+        .cardStyle()
     }
 
     // MARK: - Activity chart
@@ -277,7 +269,7 @@ struct OverviewView: View {
                     x: .value("Day", day.date, unit: .day),
                     y: .value("Total", day.completed + day.missed)
                 )
-                .foregroundStyle(Color.appDeep(accentColorHex))
+                .foregroundStyle(theme.deep)
                 .cornerRadius(4)
 
                 BarMark(
@@ -286,7 +278,7 @@ struct OverviewView: View {
                 )
                 .foregroundStyle(
                     LinearGradient(
-                        colors: [.accentLight(accentColorHex), .appAccent(accentColorHex)],
+                        colors: [theme.light, theme.accent],
                         startPoint: .bottom,
                         endPoint: .top
                     )
@@ -309,14 +301,12 @@ struct OverviewView: View {
             .frame(height: 120)
 
             HStack(spacing: 16) {
-                legendDot(color: .appAccent(accentColorHex),    label: "Completed")
-                legendDot(color: .appDeep(accentColorHex), label: "Missed / Total")
+                legendDot(color: theme.accent,    label: "Completed")
+                legendDot(color: theme.deep, label: "Missed / Total")
             }
         }
         .padding()
-        .background(Color.white)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: .black.opacity(0.04), radius: 6, y: 2)
+        .cardStyle()
     }
 
     private func legendDot(color: Color, label: String) -> some View {
@@ -352,7 +342,7 @@ struct OverviewView: View {
                     GeometryReader { geo in
                         ZStack(alignment: .leading) {
                             RoundedRectangle(cornerRadius: 3)
-                                .fill(Color.appDeep(accentColorHex))
+                                .fill(theme.deep)
                             RoundedRectangle(cornerRadius: 3)
                                 .fill(Color(hex: stat.colorHex).opacity(0.8))
                                 .frame(width: geo.size.width * stat.completionRate)
@@ -364,9 +354,7 @@ struct OverviewView: View {
             }
         }
         .padding()
-        .background(Color.white)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: .black.opacity(0.04), radius: 6, y: 2)
+        .cardStyle()
     }
 
     // MARK: - Meals card
@@ -375,13 +363,13 @@ struct OverviewView: View {
         VStack(alignment: .leading, spacing: 14) {
             Label("Meals", systemImage: "fork.knife")
                 .font(.subheadline.weight(.semibold))
-                .foregroundColor(.appAccent(accentColorHex))
+                .foregroundColor(theme.accent)
 
             HStack(alignment: .top, spacing: 0) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("\(mealsEaten)")
                         .font(.system(size: 36, weight: .bold, design: .rounded))
-                        .foregroundColor(.appAccent(accentColorHex))
+                        .foregroundColor(theme.accent)
                     Text("meal\(mealsEaten == 1 ? "" : "s") eaten")
                         .font(.caption)
                         .foregroundColor(.secondary)
@@ -402,7 +390,7 @@ struct OverviewView: View {
                     VStack(alignment: .trailing, spacing: 4) {
                         Text("\(Int(rate * 100))%")
                             .font(.system(size: 36, weight: .bold, design: .rounded))
-                            .foregroundColor(rate >= 0.7 ? .green : .appAccent(accentColorHex))
+                            .foregroundColor(rate >= 0.7 ? .green : theme.accent)
                         Text("breakfasts")
                             .font(.caption)
                             .foregroundColor(.secondary)
@@ -412,9 +400,7 @@ struct OverviewView: View {
             }
         }
         .padding()
-        .background(Color.white)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: .black.opacity(0.04), radius: 6, y: 2)
+        .cardStyle()
     }
 
     // MARK: - Habits highlight
@@ -423,13 +409,13 @@ struct OverviewView: View {
         VStack(alignment: .leading, spacing: 14) {
             Label("Habits Today", systemImage: "chart.bar.fill")
                 .font(.subheadline.weight(.semibold))
-                .foregroundColor(.appAccent(accentColorHex))
+                .foregroundColor(theme.accent)
 
             HStack(alignment: .top, spacing: 0) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("\(totalLoggedToday)")
                         .font(.system(size: 36, weight: .bold, design: .rounded))
-                        .foregroundColor(.appAccent(accentColorHex))
+                        .foregroundColor(theme.accent)
                     Text("good action\(totalLoggedToday == 1 ? "" : "s") logged")
                         .font(.caption)
                         .foregroundColor(.secondary)
@@ -441,11 +427,11 @@ struct OverviewView: View {
                         HStack(alignment: .firstTextBaseline, spacing: 4) {
                             Text("\(best.currentStreak)")
                                 .font(.system(size: 36, weight: .bold, design: .rounded))
-                                .foregroundColor(.appAccent(accentColorHex))
+                                .foregroundColor(theme.accent)
                             Text("days").font(.caption).foregroundColor(.secondary)
                         }
                         HStack(spacing: 3) {
-                            Image(systemName: "flame.fill").foregroundColor(.appAccent(accentColorHex))
+                            Image(systemName: "flame.fill").foregroundColor(theme.accent)
                             Image(systemName: best.symbolName)
                             Text(best.name)
                         }
@@ -472,20 +458,18 @@ struct OverviewView: View {
                             let p = min(Double(habit.count()) / Double(habit.dailyGoal), 1.0)
                             Text("\(habit.count())/\(habit.dailyGoal)")
                                 .font(.caption.weight(.semibold))
-                                .foregroundColor(p >= 1 ? .green : .appAccent(accentColorHex))
+                                .foregroundColor(p >= 1 ? .green : theme.accent)
                         } else {
                             Text("\(habit.count())")
                                 .font(.caption.weight(.semibold))
-                                .foregroundColor(.appAccent(accentColorHex))
+                                .foregroundColor(theme.accent)
                         }
                     }
                 }
             }
         }
         .padding()
-        .background(Color.white)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: .black.opacity(0.04), radius: 6, y: 2)
+        .cardStyle()
     }
 
     // MARK: - Empty state
@@ -494,7 +478,7 @@ struct OverviewView: View {
         VStack(spacing: 14) {
             Image(systemName: "chart.pie")
                 .font(.system(size: 52))
-                .foregroundColor(.accentLight(accentColorHex))
+                .foregroundColor(theme.light)
             Text("Nothing to show yet")
                 .font(.headline).foregroundColor(.secondary)
             Text("Add events and habits — your stats will appear here.")

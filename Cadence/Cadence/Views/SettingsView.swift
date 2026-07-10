@@ -4,6 +4,7 @@ import SwiftData
 struct SettingsView: View {
     @Query private var prefsResults: [UserPreferences]
     @Environment(\.modelContext) private var context
+    @Environment(\.theme) private var theme
 
     private var prefs: UserPreferences? { prefsResults.first }
 
@@ -31,7 +32,7 @@ struct SettingsView: View {
 
     var body: some View {
         ZStack {
-            Color.appBackground(accentColorHex).ignoresSafeArea()
+            theme.backgroundGradient.ignoresSafeArea()
             Form {
 
                 // Personalisation
@@ -48,8 +49,8 @@ struct SettingsView: View {
                         Label("App theme", systemImage: "paintpalette.fill")
                         ScrollView(.horizontal, showsIndicators: false) {
                             HStack(spacing: 10) {
-                                ForEach(Self.themeColors, id: \.hex) { theme in
-                                    themeChip(name: theme.name, hex: theme.hex)
+                                ForEach(Self.themeColors, id: \.hex) { option in
+                                    themeChip(name: option.name, hex: option.hex)
                                 }
                             }
                             .padding(.vertical, 4)
@@ -100,7 +101,7 @@ struct SettingsView: View {
                 // Notifications
                 Section("Notifications") {
                     Toggle("Enable notifications", isOn: $notificationsEnabled)
-                        .tint(Color(hex: accentColorHex))
+                        .tint(theme.accent)
                         .onChange(of: notificationsEnabled) { _, enabled in
                             if enabled { NotificationService.requestAuthorization() }
                         }
@@ -155,28 +156,21 @@ struct SettingsView: View {
                         Label("Import calendars", systemImage: "calendar.badge.plus")
                     }
                 }
-
-                // Save
-                Section {
-                    Button(action: save) {
-                        HStack {
-                            Spacer()
-                            Label("Save scheduling settings", systemImage: "checkmark")
-                                .font(.subheadline.weight(.semibold))
-                                .foregroundColor(.white)
-                            Spacer()
-                        }
-                    }
-                    .padding(.vertical, 4)
-                    .listRowBackground(Color(hex: accentColorHex))
-                }
             }
             .scrollContentBackground(.hidden)
         }
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.large)
-        .toolbarBackground(Color.appBackground(accentColorHex), for: .navigationBar)
+        .toolbarBackground(theme.background, for: .navigationBar)
         .onAppear(perform: loadPrefs)
+        // Autosave like every other prefs screen — no explicit Save button
+        // whose changes silently vanish on tab switch (UI_REVIEW §1.8).
+        .onChange(of: workStartHour)          { save() }
+        .onChange(of: workEndHour)            { save() }
+        .onChange(of: bufferMinutes)          { save() }
+        .onChange(of: aiLevel)                { save() }
+        .onChange(of: notificationsEnabled)   { save() }
+        .onChange(of: defaultReminderMinutes) { save() }
     }
 
     // MARK: - Components
@@ -222,10 +216,10 @@ struct SettingsView: View {
             HStack {
                 Text(label)
                 Spacer()
-                Text(display).foregroundColor(Color(hex: accentColorHex))
+                Text(display).foregroundColor(theme.accent)
             }
             Slider(value: value, in: range, step: step)
-                .tint(Color(hex: accentColorHex))
+                .tint(theme.accent)
         }
     }
 
@@ -267,7 +261,7 @@ struct CategoryNotificationsView: View {
     @Query(sort: \Category.name) private var categories: [Category]
     @Query private var prefsResults: [UserPreferences]
     @Environment(\.modelContext) private var context
-    @AppStorage("accentColorHex") private var accentColorHex = "#E8784D"
+    @Environment(\.theme) private var theme
 
     @State private var perCatNotifs: [UUID: Bool] = [:]
 
@@ -275,7 +269,7 @@ struct CategoryNotificationsView: View {
 
     var body: some View {
         ZStack {
-            Color.appBackground(accentColorHex).ignoresSafeArea()
+            theme.backgroundGradient.ignoresSafeArea()
             List {
                 Section {
                     ForEach(categories) { cat in
@@ -290,7 +284,7 @@ struct CategoryNotificationsView: View {
                                 Text(cat.name)
                             }
                         }
-                        .tint(Color(hex: accentColorHex))
+                        .tint(theme.accent)
                     }
                 } footer: {
                     Text("Disable to silence reminders for events in that category.")
@@ -302,7 +296,7 @@ struct CategoryNotificationsView: View {
         }
         .navigationTitle("Per-Category Alerts")
         .navigationBarTitleDisplayMode(.large)
-        .toolbarBackground(Color.appBackground(accentColorHex), for: .navigationBar)
+        .toolbarBackground(theme.background, for: .navigationBar)
         .onAppear {
             perCatNotifs = prefs?.perCategoryNotifications() ?? [:]
         }

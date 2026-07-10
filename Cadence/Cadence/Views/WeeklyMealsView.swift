@@ -7,9 +7,8 @@ struct WeeklyMealsView: View {
     @Query private var prefsResults: [UserPreferences]
     @Query private var categories: [Category]
     @Environment(\.modelContext) private var context
-    @AppStorage("accentColorHex") private var accentColorHex = "#E8784D"
+    @Environment(\.theme) private var theme
 
-    @State private var isRunningPass = false
     @State private var isFetchingSuggestions = false
     @State private var suggestionOptions: [AIService.MealSuggestionResult] = []
     @State private var showingSuggestionSheet = false
@@ -34,7 +33,7 @@ struct WeeklyMealsView: View {
 
     var body: some View {
         ZStack {
-            Color.appBackground(accentColorHex).ignoresSafeArea()
+            theme.backgroundGradient.ignoresSafeArea()
 
             if !hasPrefsSet {
                 emptyState
@@ -44,15 +43,7 @@ struct WeeklyMealsView: View {
         }
         .navigationTitle("Meals This Week")
         .navigationBarTitleDisplayMode(.large)
-        .toolbarBackground(Color.appBackground(accentColorHex), for: .navigationBar)
-        .overlay(alignment: .top) {
-            if isRunningPass {
-                ProgressView()
-                    .progressViewStyle(.linear)
-                    .tint(Color(hex: accentColorHex))
-                    .frame(height: 2)
-            }
-        }
+        .toolbarBackground(theme.background, for: .navigationBar)
         .task {
             runDailyPass()
         }
@@ -72,13 +63,13 @@ struct WeeklyMealsView: View {
         List {
             if prefs?.newMealSuggestionEnabled == true {
                 discoverCard
-                    .listRowBackground(Color.appBackground(accentColorHex))
+                    .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
                     .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
             }
             ForEach(weekDates, id: \.self) { date in
                 dayCard(for: date)
-                    .listRowBackground(Color.appBackground(accentColorHex))
+                    .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
                     .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
             }
@@ -104,7 +95,7 @@ struct WeeklyMealsView: View {
                     .foregroundColor(.secondary)
                 Text(date.formatted(.dateTime.day()))
                     .font(.subheadline.weight(isToday ? .bold : .regular))
-                    .foregroundColor(isToday ? Color(hex: accentColorHex) : .primary)
+                    .foregroundColor(isToday ? theme.accent : .primary)
             }
             .frame(width: 34)
             .padding(.top, 2)
@@ -116,9 +107,7 @@ struct WeeklyMealsView: View {
             }
         }
         .padding(14)
-        .background(Color.white)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
+        .cardStyle()
         .opacity(isPast ? 0.55 : (isFuture ? 0.75 : 1))
     }
 
@@ -138,7 +127,7 @@ struct WeeklyMealsView: View {
             HStack(spacing: 10) {
                 Image(systemName: "sparkles")
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(canFetchToday ? Color(hex: accentColorHex) : .secondary)
+                    .foregroundColor(canFetchToday ? theme.accent : .secondary)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Discover a new meal")
@@ -162,15 +151,13 @@ struct WeeklyMealsView: View {
                 }
             }
             .padding(14)
-            .background(Color.white)
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .cardStyle()
             .overlay {
                 if isDiscoveryDue && canFetchToday {
                     RoundedRectangle(cornerRadius: 14)
-                        .stroke(Color(hex: accentColorHex).opacity(0.5), lineWidth: 1)
+                        .stroke(theme.accent.opacity(0.5), lineWidth: 1)
                 }
             }
-            .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
         }
         .buttonStyle(.plain)
         .disabled(!canFetchToday || isFetchingSuggestions)
@@ -181,7 +168,7 @@ struct WeeklyMealsView: View {
     private var suggestionSheet: some View {
         NavigationStack {
             ZStack {
-                Color.appBackground(accentColorHex).ignoresSafeArea()
+                theme.backgroundGradient.ignoresSafeArea()
                 ScrollView {
                     VStack(spacing: 12) {
                         Text("Tap one to add it to tonight's schedule")
@@ -226,18 +213,16 @@ struct WeeklyMealsView: View {
                     ForEach(option.meal.tags, id: \.self) { tag in
                         Text(tag)
                             .font(.system(size: 10, weight: .semibold))
-                            .foregroundColor(Color(hex: accentColorHex))
+                            .foregroundColor(theme.accent)
                             .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(Color(hex: accentColorHex).opacity(0.12))
+                            .background(theme.accent.opacity(0.12))
                             .clipShape(Capsule())
                     }
                 }
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.white)
-            .clipShape(RoundedRectangle(cornerRadius: 14))
-            .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
+            .cardStyle()
         }
         .buttonStyle(.plain)
     }
@@ -283,7 +268,7 @@ struct WeeklyMealsView: View {
                     } label: {
                         Image(systemName: "arrow.triangle.2.circlepath")
                             .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(Color(hex: accentColorHex))
+                            .foregroundColor(theme.accent)
                             .padding(6)
                     }
                     .buttonStyle(.plain)
@@ -300,7 +285,7 @@ struct WeeklyMealsView: View {
         HStack(spacing: 6) {
             Image(systemName: icon)
                 .font(.system(size: 11))
-                .foregroundColor(.accentLight(accentColorHex))
+                .foregroundColor(theme.light)
                 .frame(width: 16)
 
             VStack(alignment: .leading, spacing: 2) {
@@ -316,9 +301,9 @@ struct WeeklyMealsView: View {
                             Text("AI pick")
                                 .font(.system(size: 9, weight: .semibold))
                         }
-                        .foregroundColor(Color(hex: accentColorHex))
+                        .foregroundColor(theme.accent)
                         .padding(.horizontal, 5).padding(.vertical, 1)
-                        .background(Color(hex: accentColorHex).opacity(0.12))
+                        .background(theme.accent.opacity(0.12))
                         .clipShape(Capsule())
                     }
                 }
@@ -348,11 +333,11 @@ struct WeeklyMealsView: View {
         VStack(spacing: 16) {
             ZStack {
                 Circle()
-                    .fill(Color.accentLight(accentColorHex).opacity(0.15))
+                    .fill(theme.light.opacity(0.15))
                     .frame(width: 90, height: 90)
                 Image(systemName: "fork.knife")
                     .font(.system(size: 38))
-                    .foregroundColor(.accentLight(accentColorHex))
+                    .foregroundColor(theme.light)
             }
             Text("No meal preferences set")
                 .font(.headline)
@@ -369,7 +354,7 @@ struct WeeklyMealsView: View {
                     .font(.subheadline.weight(.semibold))
                     .foregroundColor(.white)
                     .padding(.horizontal, 24).padding(.vertical, 12)
-                    .background(Color.appAccent(accentColorHex))
+                    .background(theme.accentGradient)
                     .clipShape(Capsule())
             }
         }
@@ -418,8 +403,6 @@ struct WeeklyMealsView: View {
 
         isFetchingSuggestions = true
         defer { isFetchingSuggestions = false }
-        p.recordMealSuggestionFetch()
-        try? context.save()
 
         do {
             suggestionOptions = try await AIService().suggestMealOptions(
@@ -428,6 +411,10 @@ struct WeeklyMealsView: View {
                 preferences: p,
                 categories: Array(categories)
             )
+            // Only a successful round trip consumes one of the daily
+            // attempts — a network error gave the user nothing (UI_REVIEW §1.3).
+            p.recordMealSuggestionFetch()
+            try? context.save()
             showingSuggestionSheet = true
         } catch {
             alertMessage = error.localizedDescription
@@ -488,9 +475,6 @@ struct WeeklyMealsView: View {
 
     private func runDailyPass() {
         guard let p = prefs else { return }
-        isRunningPass = true
-        defer { isRunningPass = false }
-
         let mealCategory = categories.first { $0.name == "Meal" }
         let coordinator = MealPlanningCoordinator(mealCategory: mealCategory)
         let result = coordinator.runDailyPass(

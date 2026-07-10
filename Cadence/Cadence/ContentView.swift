@@ -18,6 +18,10 @@ struct ContentView: View {
 
     @State private var selectedTab: Tab = .today
 
+    // The one place the accent hex becomes a Theme; every view below reads
+    // @Environment(\.theme) instead of re-deriving colors from AppStorage.
+    private var theme: Theme { Theme(accentHex: accentColorHex) }
+
     var body: some View {
         TabView(selection: $selectedTab) {
             NavigationStack { TodayView() }
@@ -40,7 +44,8 @@ struct ContentView: View {
                 .tabItem { Label("Settings", systemImage: "slider.horizontal.3")  }
                 .tag(Tab.settings)
         }
-        .tint(Color(hex: accentColorHex))
+        .tint(theme.accent)
+        .environment(\.theme, theme)
         .preferredColorScheme(.light)
         .task {
             await runDailyMealPassIfNeeded()

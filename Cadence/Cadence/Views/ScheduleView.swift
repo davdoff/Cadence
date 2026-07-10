@@ -1,8 +1,16 @@
 import SwiftUI
 import SwiftData
 
+/// Two ways to browse the schedule. Week keeps a spacious, one-week-at-a-time
+/// strip with full event cards; Month trades detail for density — a calendar
+/// grid plus compact rows so more events fit at once.
+enum ScheduleMode: String, CaseIterable {
+    case week = "Week"
+    case month = "Month"
+}
+
 struct ScheduleView: View {
-    @AppStorage("accentColorHex") private var accentColorHex = "#E8784D"
+    @Environment(\.theme) private var theme
     @Query(sort: \Event.startTime) private var allEvents: [Event]
     @Query private var categories: [Category]
     @Environment(\.modelContext) private var context
@@ -10,16 +18,40 @@ struct ScheduleView: View {
     @State private var selectedDate = Date.now
     @State private var selectedCategory: Category?
     @State private var editingEvent: Event?
+    @State private var detailEvent: Event?
+    @State private var showingAddEvent = false
+    @State private var viewMode: ScheduleMode = .week
+
+    // Which week/month the strip and grid are showing. Kept in sync with
+    // selectedDate so tapping "Today" or picking a day snaps them into view.
+    @State private var visibleWeekStart = Calendar.current
+        .dateInterval(of: .weekOfYear, for: .now)!.start
+    @State private var visibleMonth = Calendar.current
+        .dateInterval(of: .month, for: .now)!.start
+
+    private let calendar = Calendar.current
 
     var body: some View {
         ZStack {
-            Color.appBackground(accentColorHex).ignoresSafeArea()
+            theme.backgroundGradient.ignoresSafeArea()
 
             VStack(spacing: 0) {
-                // Week strip
-                weekStrip
-                    .padding(.vertical, 10)
-                    .background(Color.appBackground(accentColorHex))
+                // Mode toggle, pinned snug under the nav title.
+                modePicker
+                    .padding(.horizontal, 16)
+                    .padding(.top, 4)
+                    .padding(.bottom, 8)
+
+                Group {
+                    if viewMode == .week {
+                        weekStrip
+                    } else {
+                        monthGrid
+                    }
+                }
+                .padding(.bottom, 8)
+                .onChange(of: selectedDate) { _, new in syncPeriods(to: new) }
+                .onChange(of: viewMode) { _, _ in syncPeriods(to: selectedDate) }
 
                 // Meals this week entry point
                 NavigationLink { WeeklyMealsView() } label: {
@@ -33,11 +65,9 @@ struct ScheduleView: View {
                             .font(.caption.weight(.semibold))
                             .foregroundColor(.secondary.opacity(0.4))
                     }
-                    .foregroundColor(.appAccent(accentColorHex))
+                    .foregroundColor(theme.accent)
                     .padding(.horizontal, 16).padding(.vertical, 10)
-                    .background(Color.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .shadow(color: .black.opacity(0.04), radius: 4, y: 2)
+                    .cardStyle()
                     .padding(.horizontal, 16)
                     .padding(.bottom, 8)
                 }
@@ -54,68 +84,114 @@ struct ScheduleView: View {
                 categoryFilter
                     .padding(.bottom, 6)
 
-                Divider().overlay(Color.appDeep(accentColorHex))
+                Divider().overlay(theme.deep)
 
                 dayEventList
             }
         }
         .navigationTitle("Schedule")
         .navigationBarTitleDisplayMode(.large)
-        .toolbarBackground(Color.appBackground(accentColorHex), for: .navigationBar)
+        .toolbarBackground(theme.background, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    withAnimation { selectedDate = .now }
-                } label: {
-                    Text("Today")
-                        .font(.caption.weight(.semibold))
-                        .foregroundColor(.appAccent(accentColorHex))
+                if !Calendar.current.isDateInToday(selectedDate) {
+                    Button {
+                        withAnimation { selectedDate = .now }
+                    } label: {
+                        Text("Today")
+                            .font(.caption.weight(.semibold))
+                            .foregroundColor(theme.accent)
+                    }
                 }
+            }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button { showingAddEvent = true } label: {
+                    Image(systemName: "plus")
+                        .foregroundColor(theme.accent)
+                }
+                .accessibilityLabel("Add event")
             }
         }
         .sheet(item: $editingEvent) { event in
             AddEventView(editingEvent: event)
         }
+        .sheet(isPresented: $showingAddEvent) {
+            AddEventView(initialDate: selectedDate)
+        }
+        .navigationDestination(item: $detailEvent) { EventDetailView(event: $0) }
     }
 
-    // MARK: - Week strip
-
-    private var weekDates: [Date] {
-        let today = Calendar.current.startOfDay(for: .now)
-        return (-90...90).compactMap { Calendar.current.date(byAdding: .day, value: $0, to: today) }
-    }
-
-    private var weekStrip: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6) {
-                    ForEach(weekDates, id: \.self) { date in
-                        dayPill(date).id(date)
-                    }
-                }
-                .padding(.horizontal, 16)
-            }
-            .onAppear {
-                proxy.scrollTo(Calendar.current.startOfDay(for: selectedDate), anchor: .center)
-            }
-            .onChange(of: selectedDate) { _, new in
-                withAnimation(.spring(duration: 0.25)) {
-                    proxy.scrollTo(Calendar.current.startOfDay(for: new), anchor: .center)
-                }
-            }
+    /// Snap the strip and grid to whatever period contains `date`.
+    private func syncPeriods(to date: Date) {
+        withAnimation(.spring(duration: 0.25)) {
+            visibleWeekStart = calendar.dateInterval(of: .weekOfYear, for: date)!.start
+            visibleMonth = calendar.dateInterval(of: .month, for: date)!.start
         }
     }
 
-    private func dayPill(_ date: Date) -> some View {
-        let isSelected = Calendar.current.isDate(date, inSameDayAs: selectedDate)
-        let isToday    = Calendar.current.isDateInToday(date)
-        let dayLetter  = date.formatted(.dateTime.weekday(.narrow))
-        let dayNumber  = Calendar.current.component(.day, from: date)
+    // MARK: - Mode picker
 
-        // Dot indicator: has events
-        let start = Calendar.current.startOfDay(for: date)
-        let end   = Calendar.current.date(byAdding: .day, value: 1, to: start)!
-        let hasEvents = allEvents.contains { $0.startTime >= start && $0.startTime < end }
+    private var modePicker: some View {
+        HStack(spacing: 4) {
+            ForEach(ScheduleMode.allCases, id: \.self) { mode in
+                Button {
+                    withAnimation(.spring(duration: 0.25)) { viewMode = mode }
+                } label: {
+                    Text(mode.rawValue)
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                        .foregroundColor(viewMode == mode ? .white : .secondary)
+                        .background(
+                            viewMode == mode
+                                ? AnyShapeStyle(theme.accentGradient)
+                                : AnyShapeStyle(Color.clear)
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(4)
+        .background(theme.deep)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    // MARK: - Week strip (paged, one week at a time)
+
+    /// Half a year of weeks either side of today.
+    private var weeks: [[Date]] {
+        let thisWeekStart = calendar.dateInterval(of: .weekOfYear, for: .now)!.start
+        return (-26...26).map { offset in
+            let start = calendar.date(byAdding: .weekOfYear, value: offset, to: thisWeekStart)!
+            return (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: start) }
+        }
+    }
+
+    private var weekStrip: some View {
+        // One pass over allEvents instead of one filter per pill (UI_REVIEW §4).
+        let eventDays = Set(allEvents.map { calendar.startOfDay(for: $0.startTime) })
+        return TabView(selection: $visibleWeekStart) {
+            ForEach(weeks, id: \.first) { week in
+                HStack(spacing: 6) {
+                    ForEach(week, id: \.self) { date in
+                        dayPill(date, hasEvents: eventDays.contains(calendar.startOfDay(for: date)))
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .tag(week.first!)
+            }
+        }
+        .tabViewStyle(.page(indexDisplayMode: .never))
+        .frame(height: 72)
+    }
+
+    private func dayPill(_ date: Date, hasEvents: Bool) -> some View {
+        let isSelected = calendar.isDate(date, inSameDayAs: selectedDate)
+        let isToday    = calendar.isDateInToday(date)
+        let dayLetter  = date.formatted(.dateTime.weekday(.narrow))
+        let dayNumber  = calendar.component(.day, from: date)
 
         return Button {
             withAnimation(.spring(duration: 0.25)) { selectedDate = date }
@@ -126,24 +202,135 @@ struct ScheduleView: View {
                     .foregroundColor(isSelected ? .white : .secondary)
                 Text("\(dayNumber)")
                     .font(.subheadline.weight(isToday ? .bold : .regular))
-                    .foregroundColor(isSelected ? .white : (isToday ? .appAccent(accentColorHex) : .primary))
+                    .foregroundColor(isSelected ? .white : (isToday ? theme.accent : .primary))
                 Circle()
-                    .fill(isSelected ? Color.white.opacity(0.6) : Color.appAccent(accentColorHex))
+                    .fill(isSelected ? Color.white.opacity(0.6) : theme.accent)
                     .frame(width: 5, height: 5)
                     .opacity(hasEvents ? 1 : 0)
             }
-            .frame(width: 42, height: 62)
-            .background(isSelected ? Color.appAccent(accentColorHex) : Color.clear)
+            .frame(maxWidth: .infinity)
+            .frame(height: 60)
+            .background(isSelected ? AnyShapeStyle(theme.accentGradient) : AnyShapeStyle(Color.clear))
             .clipShape(RoundedRectangle(cornerRadius: 14))
         }
         .buttonStyle(.plain)
     }
 
+    // MARK: - Month grid
+
+    /// Event count per day, computed once for dot density in the grid.
+    private var eventCountByDay: [Date: Int] {
+        Dictionary(allEvents.map { (calendar.startOfDay(for: $0.startTime), 1) },
+                   uniquingKeysWith: +)
+    }
+
+    /// Weekday header letters, rotated to match the locale's first weekday.
+    private var weekdaySymbols: [String] {
+        let symbols = calendar.veryShortStandaloneWeekdaySymbols
+        let shift = calendar.firstWeekday - 1
+        return Array(symbols[shift...] + symbols[..<shift])
+    }
+
+    /// Leading blanks + each day of `visibleMonth`, aligned to first weekday.
+    private var monthCells: [Date?] {
+        let comps = calendar.dateComponents([.year, .month], from: visibleMonth)
+        guard let firstOfMonth = calendar.date(from: comps),
+              let range = calendar.range(of: .day, in: .month, for: firstOfMonth)
+        else { return [] }
+
+        let firstWeekday = calendar.component(.weekday, from: firstOfMonth)
+        let leading = (firstWeekday - calendar.firstWeekday + 7) % 7
+
+        var cells: [Date?] = Array(repeating: nil, count: leading)
+        for day in range {
+            cells.append(calendar.date(byAdding: .day, value: day - 1, to: firstOfMonth))
+        }
+        return cells
+    }
+
+    private var monthGrid: some View {
+        let counts = eventCountByDay
+        let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 7)
+
+        return VStack(spacing: 8) {
+            // Month header with prev/next navigation.
+            HStack {
+                Button { changeMonth(-1) } label: {
+                    Image(systemName: "chevron.left").font(.footnote.weight(.semibold))
+                }
+                Spacer()
+                Text(visibleMonth, format: .dateTime.month(.wide).year())
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Button { changeMonth(1) } label: {
+                    Image(systemName: "chevron.right").font(.footnote.weight(.semibold))
+                }
+            }
+            .foregroundColor(theme.accent)
+            .padding(.horizontal, 16)
+
+            HStack(spacing: 4) {
+                ForEach(weekdaySymbols, id: \.self) { symbol in
+                    Text(symbol)
+                        .font(.caption2.weight(.medium))
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .padding(.horizontal, 16)
+
+            LazyVGrid(columns: columns, spacing: 4) {
+                ForEach(Array(monthCells.enumerated()), id: \.offset) { _, cell in
+                    if let date = cell {
+                        monthDayCell(date, count: counts[calendar.startOfDay(for: date)] ?? 0)
+                    } else {
+                        Color.clear.frame(height: 44)
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+        }
+    }
+
+    private func monthDayCell(_ date: Date, count: Int) -> some View {
+        let isSelected = calendar.isDate(date, inSameDayAs: selectedDate)
+        let isToday    = calendar.isDateInToday(date)
+
+        return Button {
+            withAnimation(.spring(duration: 0.2)) { selectedDate = date }
+        } label: {
+            VStack(spacing: 3) {
+                Text("\(calendar.component(.day, from: date))")
+                    .font(.footnote.weight(isToday ? .bold : .regular))
+                    .foregroundColor(isSelected ? .white : (isToday ? theme.accent : .primary))
+                HStack(spacing: 2) {
+                    ForEach(0..<min(count, 3), id: \.self) { _ in
+                        Circle()
+                            .fill(isSelected ? Color.white.opacity(0.8) : theme.accent)
+                            .frame(width: 4, height: 4)
+                    }
+                }
+                .frame(height: 4)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 44)
+            .background(isSelected ? AnyShapeStyle(theme.accentGradient) : AnyShapeStyle(Color.clear))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func changeMonth(_ delta: Int) {
+        withAnimation(.spring(duration: 0.25)) {
+            visibleMonth = calendar.date(byAdding: .month, value: delta, to: visibleMonth)!
+        }
+    }
+
     // MARK: - Day stats
 
     private var selectedDayEvents: [Event] {
-        let start = Calendar.current.startOfDay(for: selectedDate)
-        let end   = Calendar.current.date(byAdding: .day, value: 1, to: start)!
+        let start = calendar.startOfDay(for: selectedDate)
+        let end   = calendar.date(byAdding: .day, value: 1, to: start)!
         return allEvents.filter { $0.startTime >= start && $0.startTime < end }
     }
 
@@ -164,9 +351,9 @@ struct ScheduleView: View {
 
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 3).fill(Color.appDeep(accentColorHex))
+                    RoundedRectangle(cornerRadius: 3).fill(theme.deep)
                     RoundedRectangle(cornerRadius: 3)
-                        .fill(Color.appAccent(accentColorHex))
+                        .fill(theme.barGradient)
                         .frame(width: geo.size.width * rate)
                         .animation(.easeOut(duration: 0.4), value: rate)
                 }
@@ -175,7 +362,7 @@ struct ScheduleView: View {
 
             Text("\(Int(rate * 100))%")
                 .font(.caption.weight(.semibold))
-                .foregroundColor(.appAccent(accentColorHex))
+                .foregroundColor(theme.accent)
                 .frame(minWidth: 34, alignment: .trailing)
         }
         .frame(height: 18)
@@ -201,7 +388,7 @@ struct ScheduleView: View {
             ? selectedCategory == nil
             : selectedCategory?.id == cat!.id
 
-        let chipColor: Color = cat == nil ? .appAccent(accentColorHex) : Color(hex: cat!.colorHex)
+        let chipColor: Color = cat == nil ? theme.accent : Color(hex: cat!.colorHex)
 
         return Button {
             withAnimation(.spring(duration: 0.2)) {
@@ -218,7 +405,7 @@ struct ScheduleView: View {
             }
             .font(.caption.weight(.semibold))
             .padding(.horizontal, 12).padding(.vertical, 6)
-            .background(isSelected ? chipColor : Color.appDeep(accentColorHex))
+            .background(isSelected ? chipColor : theme.deep)
             .foregroundColor(isSelected ? .white : .secondary)
             .clipShape(Capsule())
         }
@@ -232,18 +419,24 @@ struct ScheduleView: View {
         if filteredDayEvents.isEmpty {
             VStack(spacing: 12) {
                 Image(systemName: "moon.zzz")
-                    .font(.system(size: 40)).foregroundColor(.accentLight(accentColorHex))
+                    .font(.system(size: 40)).foregroundColor(theme.light)
                 Text(selectedCategory == nil ? "No events" : "No \(selectedCategory!.name) events")
                     .font(.subheadline).foregroundColor(.secondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
+            let compact = viewMode == .month
             List {
                 ForEach(filteredDayEvents) { event in
-                    EventRowView(event: event, onEdit: { editingEvent = event })
+                    EventRowView(event: event,
+                                 onEdit: compact ? nil : { editingEvent = event },
+                                 compact: compact)
+                        .contentShape(Rectangle())
+                        .onTapGesture { detailEvent = event }
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
-                        .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+                        .listRowInsets(EdgeInsets(top: compact ? 3 : 5, leading: 16,
+                                                  bottom: compact ? 3 : 5, trailing: 16))
                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                             Button(role: .destructive) {
                                 deleteEvent(event)
