@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Cadence reads your existing calendars so it can schedule around your commitments and avoid conflicts. You choose which calendars to import.</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>

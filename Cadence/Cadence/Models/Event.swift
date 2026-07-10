@@ -11,6 +11,12 @@ final class Event {
     var source: EventSource
     var recurrenceRule: RecurrenceRule?
     var notificationIdentifier: String?
+    // Calendar import (calendar-import.md §1) — nil for manual/AI events.
+    // externalIdentifier: ICS UID or EventKit occurrence identifier, used to
+    // dedupe on re-sync. importSourceID: which feed/calendar this came from,
+    // enabling "remove all events from this source".
+    var externalIdentifier: String?
+    var importSourceID: String?
 
     @Relationship
     var category: Category?
@@ -20,7 +26,9 @@ final class Event {
         startTime: Date,
         endTime: Date,
         category: Category? = nil,
-        source: EventSource = .manual
+        source: EventSource = .manual,
+        externalIdentifier: String? = nil,
+        importSourceID: String? = nil
     ) {
         self.id = UUID()
         self.title = title
@@ -29,6 +37,8 @@ final class Event {
         self.status = .pending
         self.source = source
         self.category = category
+        self.externalIdentifier = externalIdentifier
+        self.importSourceID = importSourceID
     }
 
     var duration: TimeInterval { endTime.timeIntervalSince(startTime) }

@@ -147,6 +147,15 @@ struct SettingsView: View {
                     }
                 }
 
+                // Calendars
+                Section("Calendars") {
+                    NavigationLink {
+                        CalendarImportView()
+                    } label: {
+                        Label("Import calendars", systemImage: "calendar.badge.plus")
+                    }
+                }
+
                 // Save
                 Section {
                     Button(action: save) {
