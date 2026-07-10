@@ -97,6 +97,8 @@ struct MissedEventsView: View {
             }
             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                 Button(role: .destructive) {
+                    // Imported events: tombstone so the next sync doesn't re-insert it.
+                    CalendarImportService.shared.noteLocalDeletion(of: event, context: context)
                     context.delete(event)
                     try? context.save()
                     WidgetSync.refresh()
@@ -110,6 +112,9 @@ struct MissedEventsView: View {
 
     private func reschedule(_ event: Event) {
         rescheduleTitle = event.title
+        // Rescheduling replaces the event — tombstone imported ones so the
+        // next sync doesn't bring back the original alongside the new copy.
+        CalendarImportService.shared.noteLocalDeletion(of: event, context: context)
         context.delete(event)
         try? context.save()
         WidgetSync.refresh()

@@ -270,3 +270,25 @@ test("RDATE adds an extra occurrence of a recurring event", async () => {
     ]);
   } finally { close(); }
 });
+
+test("pathologically dense RRULE (FREQ=MINUTELY, unbounded) → 400, not a memory blowup", async () => {
+  const dense = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "BEGIN:VEVENT",
+    "UID:dense-1@test",
+    "SUMMARY:Malicious metronome",
+    "DTSTART:20260101T000000Z",
+    "DTEND:20260101T000100Z",
+    "RRULE:FREQ=MINUTELY", // ~135k occurrences over a 94-day expansion range
+    "END:VEVENT",
+    "END:VCALENDAR",
+    "",
+  ].join("\r\n");
+  const { post, close } = boot(async () => icsResponse(dense));
+  try {
+    const { status, body } = await post(BASE_REQ);
+    assert.equal(status, 400);
+    assert.equal(body.error.code, "BAD_REQUEST");
+  } finally { close(); }
+});

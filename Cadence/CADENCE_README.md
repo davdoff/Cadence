@@ -23,6 +23,53 @@ A native iOS scheduling and productivity app for a first-time solo release. The 
 - **AI-assisted input** — user describes an event in natural language; Claude analyses it against current schedule and user preferences before adding
 - **Manual input** — title, date, time, duration, category
 
+#### 1.1 Device-calendar import (implemented — calendar-import.md §1–§3)
+
+Settings → Calendars → **Import calendars** connects the user's device
+calendars (Google, Outlook, iCloud, Exchange — everything iOS surfaces via
+EventKit) and imports their events into Cadence's own store, where the
+scheduler, conflict detection, reports, and widgets treat them like any other
+event. No AI involved anywhere in the import.
+
+- **Permission**: iOS 17+ full-access flow (`requestFullAccessToEvents`);
+  `NSCalendarsFullAccessUsageDescription` is in `Cadence/Info.plist`. The OS
+  grant is all-or-nothing, so the screen has its own per-calendar picker;
+  denied/write-only states deep-link to Settings.
+- **Pieces**: `EventKitReader` (pure EventKit → `DeviceEventInstance` value
+  structs, one shared `EKEventStore`) → `CalendarImportService` (@MainActor
+  sync orchestration, SwiftData writes) → `CalendarImportView` (picker +
+  source management UI). New model `CalendarImportSource` (member of the
+  shared schema — app **and** widget targets) records each connected
+  calendar plus its tombstones.
+- **Event model additions**: `externalIdentifier` (stable per occurrence —
+  EventKit's `calendarItemExternalIdentifier`, suffixed with the occurrence
+  date for recurring events) and `importSourceID` (which calendar/feed);
+  both nil for manual/AI events. `source = .imported`.
+- **Sync lifecycle** (90-day window): on launch, on `.EKEventStoreChanged`
+  (debounced), on manual "Sync now", and when connecting a calendar. Re-sync
+  updates title/times in place by `externalIdentifier`, preserves
+  `.completed`/`.missed` status, deletes local copies of events removed at
+  the source (pending only), rebuilds notifications for changed events, and
+  refreshes widgets once per pass. All-day events are skipped (they'd block
+  free slots). Locally deleted imports are **tombstoned** on their source so
+  a re-sync never resurrects them (delete hooks live in `ScheduleView` and
+  `MissedEventsView`).
+- **Category mapping**: calendar title → existing category (case-insensitive)
+  else a shared `"Imported"` category, created on first use. Local only,
+  never Claude.
+- **ICS subscription feeds** (same screen, "Calendar links" section): the
+  user pastes a `webcal://`/`https://…ics` URL; the thin `ICSImporter`
+  client POSTs it to `POST /v1/calendar/ics` (the server fetches and expands
+  the feed — see the routes table) and decodes plain event DTOs. Both
+  EventKit and ICS produce the shared `ImportedEventInstance` value struct,
+  so feeds run through the **same dedupe/tombstone pass** as device
+  calendars, with `importSourceID` = the feed URL and category hint = the
+  feed's `X-WR-CALNAME`. Feeds re-sync at launch and on "Sync now" (needs
+  the server reachable; a failed fetch skips the source, deleting nothing).
+  Events stay entirely inside Cadence — nothing is added to Apple Calendar,
+  so Cadence is the single source of truth for reminders (no `VALARM`
+  double-notification trap).
+
 ### 2. Event Management
 Each event supports:
 - Delete single occurrence

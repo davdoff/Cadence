@@ -260,6 +260,8 @@ struct ScheduleView: View {
 
     private func deleteEvent(_ event: Event) {
         NotificationService().cancelEventNotifications(for: event)
+        // Imported events: tombstone so the next calendar sync doesn't re-insert it.
+        CalendarImportService.shared.noteLocalDeletion(of: event, context: context)
         context.delete(event)
         try? context.save()
         WidgetSync.refresh()

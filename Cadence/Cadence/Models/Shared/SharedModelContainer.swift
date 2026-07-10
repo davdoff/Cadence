@@ -12,7 +12,8 @@ enum SharedModelContainer {
         Category.self,
         Meal.self,
         UserPreferences.self,
-        Habit.self
+        Habit.self,
+        CalendarImportSource.self
     ])
 
     /// Opens the App Group store. On a schema mismatch the store files are

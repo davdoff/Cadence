@@ -136,11 +136,19 @@ function expandEvent(ev, { windowStart, windowEnd, zone }) {
   const isInstant = Boolean(ev.start.tz);
   // ±2-day slack absorbs the wall-time-vs-instant mismatch for floating
   // rules; the precise overlap filter below trims it back.
-  const raw = ev.rrule.between(
-    windowStart.minus({ days: 2 }).toJSDate(),
-    windowEnd.plus({ days: 2 }).toJSDate(),
-    true
-  );
+  // rrule-temporal hard-caps expansion at 10k iterations and throws a plain
+  // Error past it — hourly over ~94 days is only ~2.3k, so hitting the cap
+  // means a pathological rule (FREQ=SECONDLY/MINUTELY): answer 400, not 500.
+  let raw;
+  try {
+    raw = ev.rrule.between(
+      windowStart.minus({ days: 2 }).toJSDate(),
+      windowEnd.plus({ days: 2 }).toJSDate(),
+      true
+    );
+  } catch {
+    throw badRequest("A recurring event in this feed repeats too densely to import.");
+  }
 
   // EXDATE values and RECURRENCE-ID keys share the occurrences' representation,
   // so cancellation/override matching happens on raw epoch ms, pre-conversion.

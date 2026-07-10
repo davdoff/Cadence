@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import EventKit
 
 @main
 struct CadenceApp: App {
@@ -17,6 +18,13 @@ struct CadenceApp: App {
                         UserDefaults.standard.string(forKey: "accentColorHex") ?? "#E8784D"
                     )
                     await seedIfNeeded()
+                    // Device calendars AND subscription feeds; never prompts.
+                    await CalendarImportService.shared.syncAll(context: container.mainContext)
+                }
+                // iOS posts this when the underlying calendar database changes —
+                // re-sync imported events (calendar-import.md §3.4). Never prompts.
+                .onReceive(NotificationCenter.default.publisher(for: .EKEventStoreChanged)) { _ in
+                    CalendarImportService.shared.syncIfAuthorized(context: container.mainContext)
                 }
         }
         .modelContainer(container)
