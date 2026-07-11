@@ -39,26 +39,23 @@ struct ContentView: View {
     }
 
     var body: some View {
-        TabView(selection: $selectedTab) {
-            NavigationStack { TodayView() }
-                .tabItem { Label("Today",    systemImage: "clock.fill")           }
-                .tag(Tab.today)
+        // All five screens stay mounted and crossfade by opacity (state/scroll
+        // preserved like TabView) — the native bottom TabView can't animate its
+        // content swap, so we drive it ourselves with a custom bar below. The
+        // bar is a real VStack sibling, so it reserves its own space and content
+        // never underlaps it (no per-view bottom padding needed).
+        VStack(spacing: 0) {
+            ZStack {
+                tabScreen(.today)    { TodayView() }
+                tabScreen(.schedule) { ScheduleView() }
+                tabScreen(.habits)   { HabitsView() }
+                tabScreen(.overview) { OverviewView() }
+                tabScreen(.settings) { SettingsView() }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .animation(.easeInOut(duration: 0.22), value: selectedTab)
 
-            NavigationStack { ScheduleView() }
-                .tabItem { Label("Schedule", systemImage: "calendar")             }
-                .tag(Tab.schedule)
-
-            NavigationStack { HabitsView() }
-                .tabItem { Label("Habits",   systemImage: "bolt.heart.fill")      }
-                .tag(Tab.habits)
-
-            NavigationStack { OverviewView() }
-                .tabItem { Label("Overview", systemImage: "chart.xyaxis.line")    }
-                .tag(Tab.overview)
-
-            NavigationStack { SettingsView() }
-                .tabItem { Label("Settings", systemImage: "slider.horizontal.3")  }
-                .tag(Tab.settings)
+            tabBar
         }
         .tint(theme.accent)
         .environment(\.theme, theme)
@@ -66,10 +63,6 @@ struct ContentView: View {
         // system chrome (keyboards, sheets) matches the surface set.
         .preferredColorScheme(themeMode == .system ? nil
                               : (themeMode == .dark ? .dark : .light))
-        // Tab-bar chrome (§4): re-applied whenever accent or surface changes.
-        .onAppear { theme.configureTabBarAppearance() }
-        .onChange(of: accentColorHex) { _, _ in theme.configureTabBarAppearance() }
-        .onChange(of: useDarkSurface) { _, _ in theme.configureTabBarAppearance() }
         .task {
             await runDailyMealPassIfNeeded()
         }
@@ -87,6 +80,56 @@ struct ContentView: View {
             default:                   break
             }
         }
+    }
+
+    // MARK: - Tabs
+
+    /// One tab's screen, kept mounted and crossfaded by opacity; hidden screens
+    /// drop hit-testing so only the visible one receives touches.
+    @ViewBuilder
+    private func tabScreen<Content: View>(_ tab: Tab, @ViewBuilder _ content: () -> Content) -> some View {
+        NavigationStack { content() }
+            .opacity(selectedTab == tab ? 1 : 0)
+            .allowsHitTesting(selectedTab == tab)
+    }
+
+    private var tabItems: [(tab: Tab, icon: String, label: String)] {
+        [(.today,    "clock.fill",          "Today"),
+         (.schedule, "calendar",            "Schedule"),
+         (.habits,   "bolt.heart.fill",     "Habits"),
+         (.overview, "chart.xyaxis.line",   "Overview"),
+         (.settings, "slider.horizontal.3", "Settings")]
+    }
+
+    /// Custom bottom bar matching the old native styling: accent for the selected
+    /// item, `text2` for the rest, a thin material background that fills into the
+    /// home indicator, and a hairline top divider.
+    private var tabBar: some View {
+        HStack(spacing: 0) {
+            ForEach(tabItems, id: \.tab) { item in
+                let selected = selectedTab == item.tab
+                Button { selectedTab = item.tab } label: {
+                    VStack(spacing: 4) {
+                        Image(systemName: item.icon)
+                            .font(.system(size: 18))
+                            .frame(height: 22)
+                        Text(item.label)
+                            .font(.system(size: 10, weight: .medium))
+                    }
+                    .foregroundStyle(selected ? theme.accent : theme.text2)
+                    .frame(maxWidth: .infinity)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.top, 8)
+        .padding(.bottom, 2)
+        .background(.thinMaterial, ignoresSafeAreaEdges: .bottom)
+        .overlay(alignment: .top) {
+            Rectangle().fill(theme.divider).frame(height: 0.5)
+        }
+        .animation(.easeInOut(duration: 0.22), value: selectedTab)
     }
 
     // MARK: - Day-start meal pass
