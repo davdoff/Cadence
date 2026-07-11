@@ -14,6 +14,10 @@ enum LiveActivityService {
               let startedAt = event.startedAt,
               let finishAt = event.finishTime else { return }
 
+        // Don't stack a second activity for an event that already has one.
+        guard !Activity<EventActivityAttributes>.activities
+            .contains(where: { $0.attributes.eventID == event.id.uuidString }) else { return }
+
         let attributes = EventActivityAttributes(
             eventID: event.id.uuidString,
             title: event.title,

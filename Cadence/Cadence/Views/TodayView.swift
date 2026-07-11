@@ -52,7 +52,8 @@ struct TodayView: View {
 
     private var filteredEvents: [Event] {
         switch statusFilter {
-        case .all:     return todayEvents
+        // "All" is the working set — completed events live only under "Done".
+        case .all:     return todayEvents.filter { $0.status != .completed }
         case .pending: return todayEvents.filter { $0.status == .pending  }
         case .done:    return todayEvents.filter { $0.status == .completed }
         case .missed:  return todayEvents.filter { $0.status == .missed   }
@@ -73,6 +74,8 @@ struct TodayView: View {
     var body: some View {
         ZStack {
             theme.backgroundGradient.ignoresSafeArea()
+                // Tapping off a row collapses any revealed Start/Stop pill.
+                .onTapGesture { revealedEventID = nil }
 
             VStack(spacing: 0) {
                 headerBlock
@@ -161,30 +164,31 @@ struct TodayView: View {
     // MARK: - Filter pills
 
     private var filterPills: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                ForEach(StatusFilter.allCases, id: \.self) { f in
-                    Button {
-                        withAnimation(.spring(duration: 0.2)) { statusFilter = f }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: f.icon)
-                                .font(.system(size: 11, weight: .semibold))
-                            Text(f.rawValue)
-                                .font(.caption.weight(.semibold))
-                        }
-                        .padding(.horizontal, 12).padding(.vertical, 7)
-                        .background(statusFilter == f ? f.fill(theme) : AnyShapeStyle(theme.chipBg))
-                        .foregroundColor(statusFilter == f ? .white : theme.chipText)
-                        .clipShape(Capsule())
-                        // Active pill glows in its own hue (§4 pill-glow).
-                        .shadow(color: statusFilter == f ? f.color(theme).opacity(0.45) : .clear,
-                                radius: 6, y: 2)
+        // Centered rather than flush-left; sizes unchanged. Four short pills fit
+        // without scrolling, so `.frame(maxWidth: .infinity)` centers the group.
+        HStack(spacing: 8) {
+            ForEach(StatusFilter.allCases, id: \.self) { f in
+                Button {
+                    withAnimation(.spring(duration: 0.2)) { statusFilter = f }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: f.icon)
+                            .font(.system(size: 11, weight: .semibold))
+                        Text(f.rawValue)
+                            .font(.caption.weight(.semibold))
                     }
-                    .buttonStyle(.plain)
+                    .padding(.horizontal, 12).padding(.vertical, 7)
+                    .background(statusFilter == f ? f.fill(theme) : AnyShapeStyle(theme.chipBg))
+                    .foregroundColor(statusFilter == f ? .white : theme.chipText)
+                    .clipShape(Capsule())
+                    // Active pill glows in its own hue (§4 pill-glow).
+                    .shadow(color: statusFilter == f ? f.color(theme).opacity(0.45) : .clear,
+                            radius: 6, y: 2)
                 }
+                .buttonStyle(.plain)
             }
         }
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - Event list (time-sectioned)
@@ -209,19 +213,25 @@ struct TodayView: View {
                 StartableEventRow(
                     event: event,
                     isRevealed: revealedEventID == event.id,
-                    onReveal: { withAnimation(.spring(duration: 0.3)) {
-                        revealedEventID = (revealedEventID == event.id) ? nil : event.id
-                    } },
+                    onToggle: { toggleReveal(event) },
                     onStart:  { start(event) },
+                    onStop:   { stop(event) },
                     onFinish: { complete(event) }
                 )
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
                     .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
                     .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                        Button { mark(event, .completed) } label: {
-                            Label("Done", systemImage: "checkmark")
-                        }.tint(.green)
+                        if event.status == .completed {
+                            // Swiping "complete" on an already-done event undoes it.
+                            Button { uncomplete(event) } label: {
+                                Label("Undo", systemImage: "arrow.uturn.left")
+                            }.tint(.orange)
+                        } else {
+                            Button { mark(event, .completed) } label: {
+                                Label("Done", systemImage: "checkmark")
+                            }.tint(.green)
+                        }
                     }
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         Button { mark(event, .missed) } label: {
@@ -307,9 +317,29 @@ struct TodayView: View {
     /// Marks the event as started: stamps `startedAt`, schedules the
     /// "time's up" notification, and collapses the reveal. Status stays
     /// `.pending` — the user still marks done/missed when finished.
+    /// Tap on a row: reveal (or hide) its Start/Stop affordance. Completed rows
+    /// aren't actionable, so they ignore the tap.
+    private func toggleReveal(_ event: Event) {
+        guard event.isRunning || event.canStart else { return }
+        revealedEventID = (revealedEventID == event.id) ? nil : event.id
+    }
+
     private func start(_ event: Event) {
         EventActionService.start(event, context: context)
-        withAnimation(.spring(duration: 0.3)) { revealedEventID = nil }
+        revealedEventID = nil
+    }
+
+    /// Stop a running event's timer: cancel the run and revert to pending (an
+    /// undo for an accidental Start) — completion is done by swiping, not here.
+    private func stop(_ event: Event) {
+        revealedEventID = nil
+        EventActionService.cancelTimer(event, context: context)
+    }
+
+    /// Undo a completion (swipe-right on a done event): revert to pending and
+    /// roll back the correlated habit increment.
+    private func uncomplete(_ event: Event) {
+        EventActionService.revertToPending(event, context: context)
     }
 
     /// Auto-completes a running event when its timer ends (reuses the
@@ -353,34 +383,40 @@ struct TodayView: View {
 
 // MARK: - Startable row
 
-/// Today's event row with the tap-to-start affordance. Tapping a pending event
-/// springs the card narrower and reveals a "Start" pill; tapping Start swaps the
-/// pill for a live countdown that auto-completes the event when it hits zero.
-/// (Detail is intentionally not wired here — Today is the live surface.)
+/// Today's event row with the tap-to-start affordance. Tapping a startable event
+/// springs the card narrower and reveals a "Start" pill; tapping Start swaps it
+/// for a live countdown that auto-completes when it hits zero. Tapping a running
+/// event reveals a "Stop" pill in place of the timer. The trailing area is an
+/// animatable fixed-width slot, so the card shrinks *as* the pill widens — one
+/// layout change, not a pop-in. (Detail is intentionally not wired here.)
 private struct StartableEventRow: View {
     @Environment(\.theme) private var theme
     let event: Event
     let isRevealed: Bool
-    let onReveal: () -> Void
+    let onToggle: () -> Void
     let onStart: () -> Void
+    let onStop: () -> Void
     let onFinish: () -> Void
 
+    /// Width of the trailing pill/timer slot; 0 collapses it flush to the card.
+    private var trailingWidth: CGFloat {
+        if event.isRunning { return 96 }                 // timer, or Stop when revealed
+        if event.canStart && isRevealed { return 96 }    // Start pill
+        return 0
+    }
+
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: trailingWidth > 0 ? 8 : 0) {
             EventRowView(event: event)
                 .contentShape(Rectangle())
-                .onTapGesture { if !event.isRunning { onReveal() } }
+                .onTapGesture { onToggle() }
 
-            if event.isRunning, let finish = event.finishTime {
-                runningTimer(from: event.startedAt ?? .now, to: finish)
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
-            } else if isRevealed {
-                startButton
-                    .transition(.move(edge: .trailing).combined(with: .opacity))
-            }
+            trailing
+                .frame(width: trailingWidth)
+                .clipped()
         }
-        .animation(.spring(duration: 0.3), value: isRevealed)
-        .animation(.spring(duration: 0.3), value: event.isRunning)
+        .animation(.easeInOut(duration: 0.28), value: isRevealed)
+        .animation(.easeInOut(duration: 0.28), value: event.isRunning)
         // Live auto-complete while the app is foreground and this row is on
         // screen: wait out the remaining time, then flip to complete. Restarts
         // if the event is (re)started. Off-screen/backgrounded finishes are
@@ -393,15 +429,49 @@ private struct StartableEventRow: View {
         }
     }
 
-    private var startButton: some View {
-        Button(action: onStart) {
-            Label("Start", systemImage: "play.fill")
-                .font(.caption.weight(.bold))
-                .foregroundColor(.white)
-                .padding(.horizontal, 14).padding(.vertical, 12)
-                .background(theme.pillGradient)
-                .clipShape(Capsule())
-                .shadow(color: theme.pillGlow, radius: 6, y: 2)
+    // Which single state the trailing slot is showing. All three views are kept
+    // mounted (below) and crossfaded by opacity — no identity insert/remove and
+    // no `move`, so nothing tears.
+    private var showTimer: Bool { event.isRunning && !isRevealed }
+    private var showStop:  Bool { event.isRunning && isRevealed }
+    private var showStart: Bool { !event.isRunning && event.canStart && isRevealed }
+
+    /// All three trailing states stacked and crossfaded purely by opacity. The
+    /// timer uses a stable fallback range (the event's own start/end when not
+    /// started) so it's always mountable and never inserts/removes. Hidden views
+    /// also drop hit-testing so an invisible pill can't capture a tap.
+    private var trailing: some View {
+        ZStack {
+            runningTimer(from: event.startedAt ?? event.startTime,
+                         to: event.finishTime ?? event.endTime)
+                .opacity(showTimer ? 1 : 0)
+                .allowsHitTesting(showTimer)
+
+            pill("Stop", icon: "stop.fill", fill: AnyShapeStyle(Color.red.gradient), action: onStop)
+                .opacity(showStop ? 1 : 0)
+                .allowsHitTesting(showStop)
+
+            pill("Start", icon: "play.fill", fill: AnyShapeStyle(theme.pillGradient), action: onStart)
+                .opacity(showStart ? 1 : 0)
+                .allowsHitTesting(showStart)
+        }
+    }
+
+    /// A full-card-height action pill (radius matches `cardStyle`, 18). Icon over
+    /// text so the glyph reads large and the content fills the tall, narrow pill.
+    private func pill(_ title: String, icon: String, fill: AnyShapeStyle, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 3) {
+                Image(systemName: icon)
+                    .font(.system(size: 18, weight: .bold))
+                Text(title)
+                    .font(.caption2.weight(.bold))
+                    .lineLimit(1)
+            }
+            .foregroundColor(.white)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(fill)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -413,9 +483,13 @@ private struct StartableEventRow: View {
             .font(.cadBodyStrong.monospacedDigit())
             .foregroundColor(theme.accent)
             .multilineTextAlignment(.center)
-            .frame(minWidth: 58)
-            .padding(.horizontal, 10).padding(.vertical, 12)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(theme.chipBg)
-            .clipShape(Capsule())
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            // Tapping the timer (not just the card) reveals the Stop pill.
+            // `onToggle` only flips the reveal state, so this can't start a
+            // second run or stack a Live Activity.
+            .contentShape(Rectangle())
+            .onTapGesture { onToggle() }
     }
 }

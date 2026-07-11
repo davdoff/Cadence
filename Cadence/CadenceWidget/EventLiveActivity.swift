@@ -46,35 +46,42 @@ struct EventLiveActivity: Widget {
     }
 
     private func lockScreen(_ context: ActivityViewContext<EventActivityAttributes>) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: "timer")
-                .font(.title2)
-                .foregroundStyle(accent(context))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(context.attributes.title)
-                    .font(.headline)
-                    .lineLimit(1)
-                Text("In progress")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            VStack(alignment: .trailing, spacing: 6) {
-                timerText(context)
-                    .font(.title.monospacedDigit())
+        VStack(spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "timer")
+                    .font(.title2)
                     .foregroundStyle(accent(context))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(context.attributes.title)
+                        .font(.headline)
+                        .lineLimit(1)
+                    timerText(context)
+                        .font(.title2.monospacedDigit())
+                        .foregroundStyle(accent(context))
+                }
+                Spacer()
+                // Done sits in the top-right corner.
                 stopButton(context)
             }
+
+            // Self-advancing bar across the bottom (tint is the only styling the
+            // timer-based ProgressView supports; vertical scale thickens it).
+            ProgressView(timerInterval: context.state.startedAt...context.state.finishAt,
+                         countsDown: false)
+                .tint(accent(context))
+                .labelsHidden()
+                .scaleEffect(x: 1, y: 1.8, anchor: .center)
+                .padding(.vertical, 4)
         }
         .padding()
     }
 
-    /// Interactive Stop button. Runs `StopEventIntent` in the app process,
+    /// Interactive "Done" button. Runs `StopEventIntent` in the app process,
     /// which completes the event and ends the activity. Shown on the Lock
     /// Screen and the expanded island (compact/minimal can't host buttons).
     private func stopButton(_ context: ActivityViewContext<EventActivityAttributes>) -> some View {
         Button(intent: StopEventIntent(eventID: context.attributes.eventID)) {
-            Label("Stop", systemImage: "stop.fill")
+            Label("Done", systemImage: "checkmark")
                 .font(.caption.weight(.semibold))
         }
         .tint(accent(context))

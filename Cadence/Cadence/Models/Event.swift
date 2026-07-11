@@ -52,6 +52,10 @@ final class Event {
     /// True while a manually-started event's timer is still relevant (started
     /// and not yet marked complete/missed).
     var isRunning: Bool { startedAt != nil && status == .pending }
+    /// Whether the Start affordance should be offered. Completed events are
+    /// excluded (starting one wouldn't track correctly) and already-running
+    /// events don't re-start; pending / missed / displaced are all startable.
+    var canStart: Bool { status != .completed && !isRunning }
     /// When a started event's countdown completes: the planned duration measured
     /// from the moment Start was tapped (not the scheduled end).
     var finishTime: Date? { startedAt.map { $0.addingTimeInterval(duration) } }
