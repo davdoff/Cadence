@@ -5,10 +5,9 @@ import UserNotifications
 
 @main
 struct CadenceApp: App {
-    let container: ModelContainer = {
-        SharedModelContainer.migrateLegacyStoreIfNeeded()
-        return SharedModelContainer.make()
-    }()
+    // Shared with the notification-action handler and the Live Activity Stop
+    // intent so all three mutate the same context.
+    let container: ModelContainer = SharedModelContainer.shared
 
     // Retains the notification-center delegate for the app's lifetime (the
     // center holds it weakly). Handles the Start / Postpone / Skip buttons.

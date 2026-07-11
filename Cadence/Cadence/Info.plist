@@ -15,6 +15,8 @@
 			</array>
 		</dict>
 	</array>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Cadence reads your existing calendars so it can schedule around your commitments and avoid conflicts. You choose which calendars to import.</string>
 	<key>UIAppFonts</key>

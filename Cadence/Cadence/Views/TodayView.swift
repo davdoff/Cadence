@@ -4,7 +4,6 @@ import SwiftData
 struct TodayView: View {
     @Environment(\.theme) private var theme
     @Query(sort: \Event.startTime) private var allEvents: [Event]
-    @Query private var habits: [Habit]
     @Environment(\.modelContext) private var context
     @Environment(\.scenePhase) private var scenePhase
     @AppStorage("greetingName") private var greetingName = ""
@@ -309,10 +308,7 @@ struct TodayView: View {
     /// "time's up" notification, and collapses the reveal. Status stays
     /// `.pending` — the user still marks done/missed when finished.
     private func start(_ event: Event) {
-        event.startedAt = .now
-        NotificationService().scheduleEventCompletionAlert(for: event)
-        try? context.save()
-        WidgetSync.refresh()
+        EventActionService.start(event, context: context)
         withAnimation(.spring(duration: 0.3)) { revealedEventID = nil }
     }
 
@@ -334,18 +330,11 @@ struct TodayView: View {
     }
 
     private func mark(_ event: Event, _ status: EventStatus) {
-        let svc = NotificationService()
-        event.status = status
-        svc.cancelEventNotifications(for: event)
-        if status == .completed, let cat = event.category?.name {
-            for habit in habits where habit.correlatedCategoryName?.lowercased() == cat.lowercased() {
-                habit.increment()
-            }
-        } else if status == .missed {
-            svc.scheduleReschedulingNudge(for: event, after: 2)
+        switch status {
+        case .completed: EventActionService.complete(event, context: context)
+        case .missed:    EventActionService.miss(event, context: context)
+        default:         break
         }
-        try? context.save()
-        WidgetSync.refresh()
     }
 
     private var greeting: String {

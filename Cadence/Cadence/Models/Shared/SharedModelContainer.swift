@@ -16,6 +16,16 @@ enum SharedModelContainer {
         CalendarImportSource.self
     ])
 
+    /// The one container instance for the app process. Shared so the UI's
+    /// `@Query`, the notification-action handler, and the Live Activity Stop
+    /// intent all read and write the *same* context and see each other's
+    /// changes live. App-process only (runs the legacy migration first); the
+    /// widget reads the store through `WidgetDataStore`, not this.
+    static let shared: ModelContainer = {
+        migrateLegacyStoreIfNeeded()
+        return make()
+    }()
+
     /// Opens the App Group store. On a schema mismatch the store files are
     /// wiped and recreated fresh — same recovery behaviour the app has always had.
     static func make() -> ModelContainer {

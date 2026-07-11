@@ -10,5 +10,6 @@ struct CadenceWidgetBundle: WidgetBundle {
         NextMealWidget()
         HabitWidget()
         HabitGridWidget()
+        EventLiveActivity()
     }
 }

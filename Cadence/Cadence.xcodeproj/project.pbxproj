@@ -78,7 +78,9 @@
 				Models/Habit.swift,
 				Models/Meal.swift,
 				Models/Shared/AppGroup.swift,
+				Models/Shared/EventActivityAttributes.swift,
 				Models/Shared/SharedModelContainer.swift,
+				Models/Shared/StopEventIntent.swift,
 				Models/SupportingTypes.swift,
 				Models/UserPreferences.swift,
 			);

@@ -45,16 +45,14 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
         let descriptor = FetchDescriptor<Event>(predicate: #Predicate { $0.id == uuid })
         guard let event = try? context.fetch(descriptor).first else { return }
 
-        let svc = NotificationService()
         switch action {
         case NotificationService.Action.start:
-            // Same as tapping Start in Today: stamp the timer, schedule the
-            // "done" alert. Auto-complete reconciliation finishes it later.
-            event.startedAt = .now
-            svc.scheduleEventCompletionAlert(for: event)
+            // Same as tapping Start in Today: timer + completion alert + island.
+            EventActionService.start(event, context: context)
 
         case NotificationService.Action.postpone:
             // Snooze: slide the event 15 min later and rebuild its notifications.
+            let svc = NotificationService()
             svc.cancelEventNotifications(for: event)
             let offset: TimeInterval = 15 * 60
             event.startTime = event.startTime.addingTimeInterval(offset)
@@ -63,20 +61,17 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
             event.notificationIdentifier = svc.scheduleEventReminder(for: event, reminderMinutes: lead)
             svc.scheduleEventStartAlert(for: event, reminderMinutes: lead)
             svc.scheduleMissedEventAlert(for: event)
+            try? context.save()
+            WidgetSync.refresh()
 
         case NotificationService.Action.skip:
             // Same as swipe-to-missed in Today.
-            event.status = .missed
-            svc.cancelEventNotifications(for: event)
-            svc.scheduleReschedulingNudge(for: event, after: 2)
+            EventActionService.miss(event, context: context)
 
         default:
             // Default tap / dismiss — just opens the app, nothing to change.
             return
         }
-
-        try? context.save()
-        WidgetSync.refresh()
     }
 
     @MainActor
