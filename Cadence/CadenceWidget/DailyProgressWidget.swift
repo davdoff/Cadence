@@ -14,6 +14,7 @@ struct DailyProgressWidget: Widget {
 
 struct DailyProgressWidgetView: View {
     @Environment(\.widgetFamily) private var family
+    @Environment(\.colorScheme) private var colorScheme
     let entry: ScheduleEntry
 
     private var progress: Double {
@@ -31,7 +32,7 @@ struct DailyProgressWidgetView: View {
         .containerBackground(for: .widget) {
             family == .accessoryCircular
                 ? Color.clear
-                : Color.appBackground(entry.accentHex)
+                : WidgetTheme.background(accentHex: entry.accentHex, dark: colorScheme == .dark)
         }
         .widgetURL(URL(string: "cadence://today"))
     }

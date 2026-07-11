@@ -105,8 +105,10 @@ struct AddCategoryView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Name").font(.caption.weight(.semibold)).foregroundColor(.secondary).textCase(.uppercase)
                         TextField("e.g. Work, Study, Health", text: $name)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                             .padding()
                             .cardStyle()
+                            .tapToFocus()
                     }
 
                     // Color
@@ -200,9 +202,11 @@ struct EditCategoryView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Name").font(.caption.weight(.semibold)).foregroundColor(.secondary).textCase(.uppercase)
                     TextField("Category name", text: $name)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                         .padding()
                         .background(theme.cardSurface)
                         .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .tapToFocus()
                 }
 
                 // Color

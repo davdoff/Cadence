@@ -68,13 +68,6 @@
 			);
 			target = 339994F32FF7A2CB00742FB8 /* CadenceWidgetExtension */;
 		};
-		3399950D2FF7A44700742FB8 /* Exceptions for "Cadence" folder in "Cadence" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Info.plist,
-			);
-			target = 33C3749E2FD3748500B1BB02 /* Cadence */;
-		};
 		3399950F2FF7A54300742FB8 /* Exceptions for "Cadence" folder in "CadenceWidgetExtension" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -91,6 +84,13 @@
 			);
 			target = 339994F32FF7A2CB00742FB8 /* CadenceWidgetExtension */;
 		};
+		33E538763002708700A3EB33 /* Exceptions for "Cadence" folder in "Cadence" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 33C3749E2FD3748500B1BB02 /* Cadence */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -105,7 +105,7 @@
 		33C374A12FD3748500B1BB02 /* Cadence */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				3399950D2FF7A44700742FB8 /* Exceptions for "Cadence" folder in "Cadence" target */,
+				33E538763002708700A3EB33 /* Exceptions for "Cadence" folder in "Cadence" target */,
 				3399950F2FF7A54300742FB8 /* Exceptions for "Cadence" folder in "CadenceWidgetExtension" target */,
 			);
 			path = Cadence;
@@ -119,6 +119,11 @@
 		33C374BB2FD3748C00B1BB02 /* CadenceUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = CadenceUITests;
+			sourceTree = "<group>";
+		};
+		33E5386F30026CEA00A3EB33 /* Fonts */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Fonts;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -176,6 +181,7 @@
 				339994FA2FF7A2CC00742FB8 /* CadenceWidget */,
 				339994F52FF7A2CB00742FB8 /* Frameworks */,
 				33C374A02FD3748500B1BB02 /* Products */,
+				33E5386F30026CEA00A3EB33 /* Fonts */,
 			);
 			sourceTree = "<group>";
 		};
@@ -231,6 +237,7 @@
 			);
 			fileSystemSynchronizedGroups = (
 				33C374A12FD3748500B1BB02 /* Cadence */,
+				33E5386F30026CEA00A3EB33 /* Fonts */,
 			);
 			name = Cadence;
 			packageProductDependencies = (

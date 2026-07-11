@@ -27,16 +27,16 @@ struct EventRowView: View {
     private var compactBody: some View {
         HStack(spacing: 10) {
             RoundedRectangle(cornerRadius: 2)
-                .fill(categoryColor)
+                .fill(categoryBarGradient)
                 .frame(width: 3, height: 26)
 
             Text(startTimeShort)
-                .font(.caption.weight(.semibold))
+                .font(.cadCaption)
                 .foregroundColor(.secondary)
                 .frame(width: 66, alignment: .leading)
 
             Text(event.title)
-                .font(.subheadline)
+                .font(.cadSubheadline)
                 .foregroundColor(.primary)
                 .lineLimit(1)
 
@@ -52,17 +52,20 @@ struct EventRowView: View {
 
     private var standardBody: some View {
         HStack(spacing: 12) {
+            // 6px vertical bar in the event's category gradient, with a matching
+            // glow (§4 Schedule event cards).
             RoundedRectangle(cornerRadius: 3)
-                .fill(categoryColor)
-                .frame(width: 4)
+                .fill(categoryBarGradient)
+                .frame(width: 6)
                 .padding(.vertical, 4)
+                .shadow(color: categoryGlow, radius: 5)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(event.title)
-                    .font(.subheadline.weight(.semibold))
+                    .font(.cadBodyStrong)
                     .foregroundColor(.primary)
                 Text(timeRange)
-                    .font(.caption)
+                    .font(.cadCaption)
                     .foregroundColor(.secondary)
             }
 
@@ -74,7 +77,7 @@ struct EventRowView: View {
                         .font(.caption.weight(.semibold))
                         .foregroundColor(.secondary)
                         .padding(8)
-                        .background(theme.deep)
+                        .background(theme.chipBg)
                         .clipShape(Circle())
                 }
                 .buttonStyle(.plain)
@@ -86,11 +89,20 @@ struct EventRowView: View {
         .cardStyle()
     }
 
-    private var categoryColor: Color {
+    /// The event's category gradient (falls back to the accent pill gradient
+    /// for uncategorised events).
+    private var categoryBarGradient: LinearGradient {
         if let hex = event.category?.colorHex {
-            return Color(hex: hex)
+            return theme.categoryGradient(hex: hex)
         }
-        return theme.light
+        return theme.pillGradient
+    }
+
+    private var categoryGlow: Color {
+        if let hex = event.category?.colorHex {
+            return Color(hex: hex).opacity(0.5)
+        }
+        return theme.pillGlow
     }
 
     @ViewBuilder

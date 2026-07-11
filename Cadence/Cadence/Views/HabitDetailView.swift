@@ -12,7 +12,10 @@ struct HabitDetailView: View {
     @State private var isAnalyzing = false
     @State private var analysisError: String? = nil
 
-    private var accent: Color { Color(hex: habit.colorHex) }
+    /// Per-habit tile palette (§4/§5) for the active surface; `accent` is its
+    /// icon color — the single flat hue used throughout the detail screen.
+    private var tile:   HabitTileColor.Tokens { HabitTileColor.by(id: habit.tileColorID).tokens(dark: theme.isDark) }
+    private var accent: Color { tile.icon }
 
     var body: some View {
         ZStack {
@@ -35,11 +38,11 @@ struct HabitDetailView: View {
             ToolbarItem(placement: .navigationBarTrailing) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 10)
-                        .fill(accent.opacity(0.13))
+                        .fill(tile.tileGradient)
                         .frame(width: 36, height: 36)
                     Image(systemName: habit.symbolName)
                         .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(accent)
+                        .foregroundColor(tile.icon)
                 }
             }
         }
@@ -55,7 +58,7 @@ struct HabitDetailView: View {
                         .font(.caption.weight(.semibold))
                         .foregroundColor(.secondary)
                     Text("\(habit.count())")
-                        .font(.system(size: 56, weight: .bold, design: .rounded))
+                        .font(.cadNumber(56))
                         .foregroundColor(accent)
                         .contentTransition(.numericText())
                         .animation(.spring(duration: 0.25), value: habit.count())
@@ -70,7 +73,7 @@ struct HabitDetailView: View {
                     } label: {
                         Image(systemName: "plus.circle.fill")
                             .font(.system(size: 48))
-                            .foregroundColor(accent)
+                            .foregroundStyle(tile.buttonGradient)
                     }
                     Button {
                         withAnimation(.spring(duration: 0.2)) { habit.decrement(); try? context.save() }
@@ -109,8 +112,7 @@ struct HabitDetailView: View {
                             RoundedRectangle(cornerRadius: 4)
                                 .fill(done
                                       ? AnyShapeStyle(Color.green)
-                                      : AnyShapeStyle(LinearGradient(colors: [accent.opacity(0.55), accent],
-                                                                     startPoint: .leading, endPoint: .trailing)))
+                                      : AnyShapeStyle(tile.buttonGradient))
                                 .frame(width: geo.size.width * prog)
                                 .animation(.easeOut(duration: 0.3), value: prog)
                         }
@@ -161,7 +163,7 @@ struct HabitDetailView: View {
 
             HStack {
                 Text("\(weekTotal)")
-                    .font(.system(size: 36, weight: .bold, design: .rounded))
+                    .font(.cadNumber(36))
                     .foregroundColor(accent)
                 Text("/ \(habit.weeklyGoal)")
                     .font(.subheadline)

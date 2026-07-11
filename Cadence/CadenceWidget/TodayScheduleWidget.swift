@@ -13,6 +13,7 @@ struct TodayScheduleWidget: Widget {
 }
 
 struct TodayScheduleWidgetView: View {
+    @Environment(\.colorScheme) private var colorScheme
     let entry: ScheduleEntry
 
     private var progress: Double {
@@ -27,7 +28,7 @@ struct TodayScheduleWidgetView: View {
             eventsColumn
         }
         .containerBackground(for: .widget) {
-            Color.appBackground(entry.accentHex)
+            WidgetTheme.background(accentHex: entry.accentHex, dark: colorScheme == .dark)
         }
         .widgetURL(URL(string: "cadence://today"))
     }

@@ -11,6 +11,14 @@ enum HabitType: String, Codable {
     case good, bad
 }
 
+/// Manual light/dark override (CADENCE_DESIGN_SYSTEM §5). Lives in the shared
+/// model layer because `UserPreferences` (a widget-shared model) stores it;
+/// UI presentation (`label`/`symbol`) is an app-side extension in Theme.swift.
+enum ThemeMode: String, CaseIterable, Identifiable, Codable {
+    case system, light, dark
+    var id: String { rawValue }
+}
+
 struct HabitDayEntry: Identifiable {
     let id: Date
     let date: Date

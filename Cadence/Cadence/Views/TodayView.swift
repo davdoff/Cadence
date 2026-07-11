@@ -31,11 +31,11 @@ struct TodayView: View {
             case .missed:  return .red.opacity(0.75)
             }
         }
-        /// Selected-pill fill: gradient for accent-colored filters, flat for
-        /// the semantic green/red ones.
+        /// Selected-pill fill (§4): the accent `pill` gradient for accent-colored
+        /// filters, flat semantic color for the green/red ones.
         func fill(_ theme: Theme) -> AnyShapeStyle {
             switch self {
-            case .all, .pending: return AnyShapeStyle(theme.accentGradient)
+            case .all, .pending: return AnyShapeStyle(theme.pillGradient)
             case .done, .missed: return AnyShapeStyle(color(theme))
             }
         }
@@ -109,7 +109,7 @@ struct TodayView: View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 6) {
                 Text(greeting)
-                    .font(.headline)
+                    .font(.cadHeadline)
                     .foregroundColor(.primary)
 
                 if !todayEvents.isEmpty {
@@ -168,9 +168,12 @@ struct TodayView: View {
                                 .font(.caption.weight(.semibold))
                         }
                         .padding(.horizontal, 12).padding(.vertical, 7)
-                        .background(statusFilter == f ? f.fill(theme) : AnyShapeStyle(theme.deep))
-                        .foregroundColor(statusFilter == f ? .white : .secondary)
+                        .background(statusFilter == f ? f.fill(theme) : AnyShapeStyle(theme.chipBg))
+                        .foregroundColor(statusFilter == f ? .white : theme.chipText)
                         .clipShape(Capsule())
+                        // Active pill glows in its own hue (§4 pill-glow).
+                        .shadow(color: statusFilter == f ? f.color(theme).opacity(0.45) : .clear,
+                                radius: 6, y: 2)
                     }
                     .buttonStyle(.plain)
                 }
@@ -235,12 +238,12 @@ struct TodayView: View {
     private var emptyState: some View {
         VStack(spacing: 16) {
             ZStack {
-                Circle().fill(theme.light.opacity(0.15)).frame(width: 90, height: 90)
+                Circle().fill(theme.emptyOrb).frame(width: 90, height: 90)
                 Image(systemName: "calendar.badge.plus")
-                    .font(.system(size: 40)).foregroundColor(theme.light)
+                    .font(.system(size: 40)).foregroundColor(theme.accent)
             }
             Text("Nothing scheduled today")
-                .font(.headline).foregroundColor(.secondary)
+                .font(.cadHeadline).foregroundColor(.secondary)
             Text("Tap + to add an event or ask AI to schedule one.")
                 .font(.subheadline).foregroundColor(.secondary)
                 .multilineTextAlignment(.center).padding(.horizontal, 40)
@@ -261,26 +264,30 @@ struct TodayView: View {
     // MARK: - FAB buttons
 
     private var addButtons: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 14) {
+            // "Ask AI" — lighter/outlined variant of the pill family (§4).
             Button { showingAIInput = true } label: {
                 Label("Ask AI", systemImage: "sparkles")
-                    .font(.subheadline.weight(.semibold))
+                    .font(.cadBodyStrong)
                     .foregroundColor(theme.accent)
-                    .padding(.horizontal, 20).padding(.vertical, 12)
-                    .background(theme.deep)
+                    .padding(.horizontal, 26).padding(.vertical, 16)
+                    .background(theme.chipBg)
                     .clipShape(Capsule())
+                    .overlay(Capsule().stroke(theme.accent.opacity(0.4), lineWidth: 1.5))
             }
+            // "Add Event" — filled pill gradient + colored glow (§4).
             Button { showingAddEvent = true } label: {
                 Label("Add Event", systemImage: "plus")
-                    .font(.subheadline.weight(.semibold))
+                    .font(.cadBodyStrong)
                     .foregroundColor(.white)
-                    .padding(.horizontal, 20).padding(.vertical, 12)
-                    .background(theme.accentGradient)
+                    .padding(.horizontal, 26).padding(.vertical, 16)
+                    .background(theme.pillGradient)
                     .clipShape(Capsule())
+                    .shadow(color: theme.pillGlow, radius: 12, y: 5)
             }
         }
-        .padding(.vertical, 8)
-        .shadow(color: .black.opacity(0.08), radius: 8, y: 4)
+        .padding(.top, 8)
+        .padding(.bottom, 20)
     }
 
     // MARK: - Helpers

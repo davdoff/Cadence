@@ -59,6 +59,7 @@ struct HabitGridWidget: Widget {
 }
 
 struct HabitGridWidgetView: View {
+    @Environment(\.colorScheme) private var colorScheme
     let entry: HabitGridEntry
 
     private let columns = [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)]
@@ -76,7 +77,7 @@ struct HabitGridWidgetView: View {
             }
         }
         .containerBackground(for: .widget) {
-            Color.appBackground(entry.accentHex)
+            WidgetTheme.background(accentHex: entry.accentHex, dark: colorScheme == .dark)
         }
         .widgetURL(URL(string: "cadence://habits"))
     }

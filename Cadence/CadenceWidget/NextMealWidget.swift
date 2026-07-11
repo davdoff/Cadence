@@ -50,6 +50,7 @@ struct NextMealWidget: Widget {
 }
 
 struct NextMealWidgetView: View {
+    @Environment(\.colorScheme) private var colorScheme
     let entry: MealEntry
 
     var body: some View {
@@ -84,7 +85,7 @@ struct NextMealWidgetView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .containerBackground(for: .widget) {
-            Color.appBackground(entry.accentHex)
+            WidgetTheme.background(accentHex: entry.accentHex, dark: colorScheme == .dark)
         }
         .widgetURL(URL(string: "cadence://meals"))
     }

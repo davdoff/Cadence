@@ -196,7 +196,7 @@ struct OverviewView: View {
                 // Center label
                 VStack(spacing: 2) {
                     Text("\(Int(rate * 100))%")
-                        .font(.system(size: 42, weight: .bold, design: .rounded))
+                        .font(.cadNumber(42))
                         .foregroundColor(theme.accent)
                         .contentTransition(.numericText())
                         .animation(.spring(duration: 0.4), value: rate)
@@ -368,7 +368,7 @@ struct OverviewView: View {
             HStack(alignment: .top, spacing: 0) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("\(mealsEaten)")
-                        .font(.system(size: 36, weight: .bold, design: .rounded))
+                        .font(.cadNumber(36))
                         .foregroundColor(theme.accent)
                     Text("meal\(mealsEaten == 1 ? "" : "s") eaten")
                         .font(.caption)
@@ -378,7 +378,7 @@ struct OverviewView: View {
 
                 VStack(alignment: .center, spacing: 4) {
                     Text("\(mealsMissed)")
-                        .font(.system(size: 36, weight: .bold, design: .rounded))
+                        .font(.cadNumber(36))
                         .foregroundColor(mealsMissed > 0 ? .red.opacity(0.7) : .secondary)
                     Text("missed")
                         .font(.caption)
@@ -389,7 +389,7 @@ struct OverviewView: View {
                 if let rate = breakfastRate {
                     VStack(alignment: .trailing, spacing: 4) {
                         Text("\(Int(rate * 100))%")
-                            .font(.system(size: 36, weight: .bold, design: .rounded))
+                            .font(.cadNumber(36))
                             .foregroundColor(rate >= 0.7 ? .green : theme.accent)
                         Text("breakfasts")
                             .font(.caption)
@@ -414,7 +414,7 @@ struct OverviewView: View {
             HStack(alignment: .top, spacing: 0) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("\(totalLoggedToday)")
-                        .font(.system(size: 36, weight: .bold, design: .rounded))
+                        .font(.cadNumber(36))
                         .foregroundColor(theme.accent)
                     Text("good action\(totalLoggedToday == 1 ? "" : "s") logged")
                         .font(.caption)
@@ -426,7 +426,7 @@ struct OverviewView: View {
                     VStack(alignment: .trailing, spacing: 4) {
                         HStack(alignment: .firstTextBaseline, spacing: 4) {
                             Text("\(best.currentStreak)")
-                                .font(.system(size: 36, weight: .bold, design: .rounded))
+                                .font(.cadNumber(36))
                                 .foregroundColor(theme.accent)
                             Text("days").font(.caption).foregroundColor(.secondary)
                         }

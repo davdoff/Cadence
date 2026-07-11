@@ -14,6 +14,7 @@ struct NextEventsWidget: Widget {
 
 struct NextEventsWidgetView: View {
     @Environment(\.widgetFamily) private var family
+    @Environment(\.colorScheme) private var colorScheme
     let entry: ScheduleEntry
 
     var body: some View {
@@ -27,7 +28,7 @@ struct NextEventsWidgetView: View {
         .containerBackground(for: .widget) {
             family == .accessoryRectangular
                 ? Color.clear
-                : Color.appBackground(entry.accentHex)
+                : WidgetTheme.background(accentHex: entry.accentHex, dark: colorScheme == .dark)
         }
         .widgetURL(URL(string: "cadence://today"))
     }

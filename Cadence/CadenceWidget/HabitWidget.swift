@@ -53,6 +53,7 @@ struct HabitWidget: Widget {
 
 struct HabitWidgetView: View {
     @Environment(\.widgetFamily) private var family
+    @Environment(\.colorScheme) private var colorScheme
     let entry: HabitEntry
 
     var body: some View {
@@ -70,7 +71,7 @@ struct HabitWidgetView: View {
         .containerBackground(for: .widget) {
             family == .accessoryCircular
                 ? Color.clear
-                : Color.appBackground(entry.accentHex)
+                : WidgetTheme.background(accentHex: entry.accentHex, dark: colorScheme == .dark)
         }
         .widgetURL(URL(string: "cadence://habits"))
     }

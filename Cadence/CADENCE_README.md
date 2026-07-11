@@ -114,19 +114,61 @@ Each event supports:
   calendar sync doesn't re-insert them.
 
 ### 5b. UI theme layer (`Extensions/Theme.swift`)
-- `Theme` is a value derived from the accent hex, injected once from
-  `ContentView` via `.environment(\.theme, …)`; every view reads
-  `@Environment(\.theme)` — no view re-reads `@AppStorage("accentColorHex")`
-  (only `ContentView` and the Settings theme picker still touch the raw hex).
-- Palette: `theme.accent / background / deep / light / dark / cardSurface`
-  plus gradients: `accentGradient` (filled buttons, selected pills, rings),
-  `backgroundGradient` (page backgrounds), `barGradient` (progress bars),
-  `cardGradient` (subtle card wash).
-- `.cardStyle(prominent:)` is the shared card chrome (surface + corner
-  radius + shadow) used by all white cards; hero cards (Overview ring,
-  Habits summary) pass `prominent: true`.
-- Widgets still mirror the flat accent via `WidgetSync.mirrorAccent` — the
-  widget target has **not** had a gradient pass yet.
+- `Theme` has **two independent axes** (see `CADENCE_DESIGN_SYSTEM.md`):
+  the **accent** (`accentHex`, from the Settings color picker) drives accent
+  gradients; the **surface** (`Surface.light` / `Surface.dark`) drives all
+  mode-dependent chrome (text, cards, chips, tab bar, dividers, tracks).
+  Injected once from `ContentView` via `.environment(\.theme, …)`; every view
+  reads `@Environment(\.theme)`.
+- **Light/dark mode:** `@AppStorage("themeMode")` (`ThemeMode` = `.system` /
+  `.light` / `.dark`) is the live driver, mirrored into `UserPreferences.themeModeRaw`
+  for durability. `ContentView` resolves it against `@Environment(\.colorScheme)`
+  (`.system` follows the device) to pick `Surface.dark` vs `.light`, and sets
+  `.preferredColorScheme` (nil for `.system`). Chosen in Settings →
+  Personalisation → Appearance, beneath the accent swatches.
+- Accent palette: `theme.accent / deep / light / dark`. Surface palette:
+  `text / text2 / background / cardSurface / cardRing / cardShadow / chipBg /
+  chipText / divider / track`. Gradients: `pillGradient` + `pillGlow` (filled
+  controls), `accentGradient` (legacy filled), `backgroundGradient` (page wash),
+  `barGradient` (progress bars), `cardGradient` (card wash), `ringGradient`
+  (conic habits ring), `emptyOrb` (radial empty-state), `tabbarGradient`,
+  and `categoryGradient(hex:)` (180° bar/dot from any category/habit hex).
+- `.cardStyle(prominent:)` is the shared card chrome (gradient surface + corner
+  radius + soft colored shadow + 1px translucent ring) used by all cards; hero
+  cards (Overview ring, Habits summary) pass `prominent: true`.
+- **Typography (`Extensions/Font+Cadence.swift`):** two bundled families —
+  **Bricolage Grotesque ExtraBold** (big headlines/numbers only) and **Manrope
+  500–800** (all other UI text). Call sites use semantic `Font` roles, never raw
+  sizes: `.cadHero / .cadHeadline / .cadNumber(_:)` (Bricolage) and
+  `.cadBody / .cadBodyStrong / .cadSubheadline / .cadFootnote / .cadCaption /
+  .cadUI(_:weight:relativeTo:)` (Manrope). `CadenceType.bundled` checks at
+  runtime whether the faces are registered; if not, every role falls back to the
+  **rounded** system design at a heavy weight — an explicit placeholder, never a
+  silent San-Francisco swap. Fonts are added to the app target + `UIAppFonts` by
+  David; PostScript names live in `CadenceType` and must match Font Book.
+- **Per-habit tile colors (`Extensions/HabitTileColor.swift`):** an extensible
+  catalog of color identities (starter set orange/pink/slate), each with a light
+  and dark `Tokens` set — `tileGradient` (icon tile), `icon` tint,
+  `buttonGradient` (+/− and progress fills), and `solid`/`solidHex`. `Habit`
+  stores a `tileColorID` (plain String, so the widget-shared model stays
+  Foundation-only; declaration default `"orange"` migrates existing habits) and
+  keeps `colorHex` mirrored to the tile's `solidHex` for the widget. AddHabit's
+  color picker is driven by `HabitTileColor.all`, so new tiles appear
+  automatically. Resolve with `HabitTileColor.by(id:).tokens(dark: theme.isDark)`.
+- **Tab bar (`Theme.configureTabBarAppearance()`):** sets the global `UITabBar`
+  appearance to the `tabbar-bg` wash over the system blur, a 1px top divider, and
+  accent-tinted selection; `ContentView` re-applies it on appear and whenever the
+  accent or surface changes. (The active-tab "pill chip" is intentionally not
+  done — stock `TabView` has no per-item background.)
+- **Widget light/dark (`WidgetTheme.background(accentHex:dark:)`):** widgets pick
+  their container background from their **own** `@Environment(\.colorScheme)` — a
+  dark surface in dark mode, the accent wash in light — so background and text
+  stay consistent. (Widgets follow the system scheme, not the app's manual
+  override, since home-screen widgets can't force a scheme.)
+- **Status:** the gradient-refresh reskin (Phases 1–6) is complete — theming
+  core, typography, Today/Schedule/Habits tabs, per-habit tile colors, tab-bar
+  chrome, and widget light/dark parity. Accent is still mirrored to widgets via
+  `WidgetSync.mirrorAccent`.
 
 ## 6. Meal Planning (Detailed)
 
@@ -366,6 +408,7 @@ struct MealSchedulerService {
 - User defines habits, each tagged as either a **good habit** (something to do more of) or a **bad habit** (something to reduce)
 - Both types are tracked by **count**, not boolean — e.g. "went to gym 4 times", "smoked 3 times"
 - A habit can be **correlated to an event category by name** — when a matching event is marked as Completed, the habit count auto-increments; otherwise the user increments manually
+- Habits are **created and edited** through `AddHabitView` — a **long-press** on a habit card opens a context menu (View Details / Edit / Delete); Edit reuses the same sheet via `AddHabitView(editingHabit:)` and updates in place
 - Each habit shows a **graph of count over time** (daily/weekly view)
 - **Weekly habit message** — once a week the user receives a habit analysis:
   - Hardcoded threshold responses trigger automatically (e.g. streak broken, new personal best, bad habit spiking) — no API call, always fires

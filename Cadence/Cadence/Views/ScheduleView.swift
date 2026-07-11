@@ -138,22 +138,24 @@ struct ScheduleView: View {
                     withAnimation(.spring(duration: 0.25)) { viewMode = mode }
                 } label: {
                     Text(mode.rawValue)
-                        .font(.subheadline.weight(.semibold))
+                        .font(.cadFootnote)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
-                        .foregroundColor(viewMode == mode ? .white : .secondary)
+                        .foregroundColor(viewMode == mode ? .white : theme.chipText)
                         .background(
                             viewMode == mode
-                                ? AnyShapeStyle(theme.accentGradient)
+                                ? AnyShapeStyle(theme.pillGradient)
                                 : AnyShapeStyle(Color.clear)
                         )
                         .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .shadow(color: viewMode == mode ? theme.pillGlow.opacity(0.6) : .clear,
+                                radius: 6, y: 2)
                 }
                 .buttonStyle(.plain)
             }
         }
         .padding(4)
-        .background(theme.deep)
+        .background(theme.chipBg)
         .clipShape(RoundedRectangle(cornerRadius: 14))
     }
 
@@ -210,8 +212,9 @@ struct ScheduleView: View {
             }
             .frame(maxWidth: .infinity)
             .frame(height: 60)
-            .background(isSelected ? AnyShapeStyle(theme.accentGradient) : AnyShapeStyle(Color.clear))
+            .background(isSelected ? AnyShapeStyle(theme.pillGradient) : AnyShapeStyle(Color.clear))
             .clipShape(RoundedRectangle(cornerRadius: 14))
+            .shadow(color: isSelected ? theme.pillGlow : .clear, radius: 7, y: 3)
         }
         .buttonStyle(.plain)
     }
@@ -314,8 +317,9 @@ struct ScheduleView: View {
             }
             .frame(maxWidth: .infinity)
             .frame(height: 44)
-            .background(isSelected ? AnyShapeStyle(theme.accentGradient) : AnyShapeStyle(Color.clear))
+            .background(isSelected ? AnyShapeStyle(theme.pillGradient) : AnyShapeStyle(Color.clear))
             .clipShape(RoundedRectangle(cornerRadius: 10))
+            .shadow(color: isSelected ? theme.pillGlow.opacity(0.7) : .clear, radius: 5, y: 2)
         }
         .buttonStyle(.plain)
     }
@@ -397,16 +401,19 @@ struct ScheduleView: View {
         } label: {
             HStack(spacing: 5) {
                 if let cat {
-                    Circle().fill(chipColor).frame(width: 7, height: 7)
+                    // Dot uses the category's own gradient, not a flat fill (§4).
+                    Circle()
+                        .fill(theme.categoryGradient(hex: cat.colorHex))
+                        .frame(width: 7, height: 7)
                     Text(cat.name)
                 } else {
                     Text("All")
                 }
             }
-            .font(.caption.weight(.semibold))
+            .font(.cadFootnote)
             .padding(.horizontal, 12).padding(.vertical, 6)
-            .background(isSelected ? chipColor : theme.deep)
-            .foregroundColor(isSelected ? .white : .secondary)
+            .background(isSelected ? AnyShapeStyle(chipColor) : AnyShapeStyle(theme.chipBg))
+            .foregroundColor(isSelected ? .white : theme.chipText)
             .clipShape(Capsule())
         }
         .buttonStyle(.plain)

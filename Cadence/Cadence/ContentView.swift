@@ -7,9 +7,11 @@ struct ContentView: View {
     }
 
     @AppStorage("accentColorHex") private var accentColorHex = "#E8784D"
+    @AppStorage("themeMode") private var themeModeRaw = ThemeMode.system.rawValue
     @AppStorage("lastMealPassDay") private var lastMealPassDay = ""
 
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.colorScheme) private var systemScheme
     @Environment(\.modelContext) private var context
     @Query(sort: \Event.startTime) private var allEvents: [Event]
     @Query private var allMeals: [Meal]
@@ -18,9 +20,23 @@ struct ContentView: View {
 
     @State private var selectedTab: Tab = .today
 
-    // The one place the accent hex becomes a Theme; every view below reads
+    private var themeMode: ThemeMode { ThemeMode(rawValue: themeModeRaw) ?? .system }
+
+    /// Whether to render the dark surface set: forced modes decide directly;
+    /// `.system` follows the device color scheme.
+    private var useDarkSurface: Bool {
+        switch themeMode {
+        case .system: return systemScheme == .dark
+        case .light:  return false
+        case .dark:   return true
+        }
+    }
+
+    // The one place accent + surface become a Theme; every view below reads
     // @Environment(\.theme) instead of re-deriving colors from AppStorage.
-    private var theme: Theme { Theme(accentHex: accentColorHex) }
+    private var theme: Theme {
+        Theme(accentHex: accentColorHex, surface: useDarkSurface ? .dark : .light)
+    }
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -46,7 +62,14 @@ struct ContentView: View {
         }
         .tint(theme.accent)
         .environment(\.theme, theme)
-        .preferredColorScheme(.light)
+        // `.system` follows the device (nil); forced modes pin the scheme so
+        // system chrome (keyboards, sheets) matches the surface set.
+        .preferredColorScheme(themeMode == .system ? nil
+                              : (themeMode == .dark ? .dark : .light))
+        // Tab-bar chrome (§4): re-applied whenever accent or surface changes.
+        .onAppear { theme.configureTabBarAppearance() }
+        .onChange(of: accentColorHex) { _, _ in theme.configureTabBarAppearance() }
+        .onChange(of: useDarkSurface) { _, _ in theme.configureTabBarAppearance() }
         .task {
             await runDailyMealPassIfNeeded()
         }

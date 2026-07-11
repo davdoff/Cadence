@@ -9,7 +9,12 @@ final class Habit {
     var correlatedCategoryName: String?
     var countLog: [String: Int]
     var symbolName: String = "star.fill"   // SF Symbol name
-    var colorHex:   String = "#E8784D"     // defaults to cadenceOrange
+    var colorHex:   String = "#E8784D"     // widget-facing flat color; kept in
+                                           //   sync with the tile's solid color
+    // Per-habit tile-color identity (CADENCE_DESIGN_SYSTEM §5). A plain String
+    // so this widget-shared model stays Foundation-only; must match a
+    // `HabitTileColor` id. Declaration default migrates existing habits.
+    var tileColorID: String = "orange"
     var dailyGoal:  Int    = 1             // 0 = no goal
     var weeklyGoal: Int    = 0             // 0 = no goal
 
@@ -19,6 +24,7 @@ final class Habit {
         correlatedCategoryName: String? = nil,
         symbolName: String? = nil,
         colorHex: String? = nil,
+        tileColorID: String? = nil,
         dailyGoal: Int = 1,
         weeklyGoal: Int = 0
     ) {
@@ -29,6 +35,7 @@ final class Habit {
         self.countLog = [:]
         self.symbolName = symbolName ?? (type == .good ? "star.fill" : "bolt.slash.fill")
         self.colorHex   = colorHex   ?? (type == .good ? "#E8784D"  : "#E05252")
+        self.tileColorID = tileColorID ?? "orange"
         self.dailyGoal  = type == .good ? max(dailyGoal, 0) : 0
         self.weeklyGoal = weeklyGoal
     }

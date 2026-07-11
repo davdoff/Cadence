@@ -7,16 +7,33 @@ struct AddHabitView: View {
     @Environment(\.modelContext) private var context
     @Query private var categories: [Category]
 
-    @State private var name = ""
-    @State private var type: HabitType = .good
-    @State private var selectedSymbol = "star.fill"
-    @State private var selectedColor  = "#E8784D"
-    @State private var dailyGoal  = 1
-    @State private var weeklyGoal = 0
-    @State private var correlatedCategoryName: String? = nil
+    /// When non-nil the sheet edits this habit in place instead of creating one.
+    private let editingHabit: Habit?
 
+    @State private var name: String
+    @State private var type: HabitType
+    @State private var selectedSymbol: String
+    @State private var selectedTileID: String
+    @State private var dailyGoal:  Int
+    @State private var weeklyGoal: Int
+    @State private var correlatedCategoryName: String?
+
+    init(editingHabit: Habit? = nil) {
+        self.editingHabit = editingHabit
+        _name          = State(initialValue: editingHabit?.name ?? "")
+        _type          = State(initialValue: editingHabit?.type ?? .good)
+        _selectedSymbol = State(initialValue: editingHabit?.symbolName ?? "star.fill")
+        _selectedTileID = State(initialValue: editingHabit?.tileColorID ?? HabitTileColor.defaultID)
+        _dailyGoal     = State(initialValue: editingHabit?.dailyGoal ?? 1)
+        _weeklyGoal    = State(initialValue: editingHabit?.weeklyGoal ?? 0)
+        _correlatedCategoryName = State(initialValue: editingHabit?.correlatedCategoryName)
+    }
+
+    private var isEditing: Bool { editingHabit != nil }
     private var symbols: [String] { type == .good ? Habit.goodSymbols : Habit.badSymbols }
-    private var accent:  Color    { Color(hex: selectedColor) }
+    /// Live tile tokens for the chosen color, resolved for the active surface.
+    private var tile:   HabitTileColor.Tokens { HabitTileColor.by(id: selectedTileID).tokens(dark: theme.isDark) }
+    private var accent: Color { tile.icon }
 
     var body: some View {
         NavigationStack {
@@ -35,14 +52,14 @@ struct AddHabitView: View {
                     .padding(.bottom, 24)
                 }
             }
-            .navigationTitle("New Habit")
+            .navigationTitle(isEditing ? "Edit Habit" : "New Habit")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }.foregroundColor(accent)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Add") { save() }
+                    Button(isEditing ? "Save" : "Add") { save() }
                         .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
                         .foregroundColor(name.trimmingCharacters(in: .whitespaces).isEmpty ? .secondary : accent)
                 }
@@ -56,7 +73,7 @@ struct AddHabitView: View {
         HStack(spacing: 14) {
             ZStack {
                 RoundedRectangle(cornerRadius: 14)
-                    .fill(accent.opacity(0.15))
+                    .fill(tile.tileGradient)
                     .frame(width: 56, height: 56)
                 Image(systemName: selectedSymbol)
                     .font(.system(size: 24, weight: .semibold))
@@ -114,18 +131,23 @@ struct AddHabitView: View {
 
     private var colorPickerCard: some View {
         cardContainer(title: "Colour") {
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 6), spacing: 10) {
-                ForEach(Habit.presetColors, id: \.self) { hex in
+            // Driven by the extensible tile catalog, not a fixed hex list —
+            // any tiles added to `HabitTileColor.all` show up automatically.
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: 5), spacing: 12) {
+                ForEach(HabitTileColor.all) { option in
+                    let tokens = option.tokens(dark: theme.isDark)
+                    let isSelected = selectedTileID == option.id
                     Button {
-                        withAnimation(.spring(duration: 0.2)) { selectedColor = hex }
+                        withAnimation(.spring(duration: 0.2)) { selectedTileID = option.id }
                     } label: {
                         ZStack {
                             Circle()
-                                .fill(Color(hex: hex))
-                                .frame(width: 36, height: 36)
-                            if selectedColor == hex {
+                                .fill(tokens.buttonGradient)
+                                .frame(width: 40, height: 40)
+                                .shadow(color: tokens.solid.opacity(isSelected ? 0.5 : 0), radius: 5)
+                            if isSelected {
                                 Image(systemName: "checkmark")
-                                    .font(.system(size: 13, weight: .bold))
+                                    .font(.system(size: 14, weight: .bold))
                                     .foregroundColor(.white)
                             }
                         }
@@ -143,7 +165,9 @@ struct AddHabitView: View {
         cardContainer(title: "Details") {
             VStack(spacing: 0) {
                 TextField("Habit name", text: $name)
-                    .padding(.vertical, 10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 14)
+                    .tapToFocus()
 
                 Divider().overlay(theme.deep)
 
@@ -155,7 +179,6 @@ struct AddHabitView: View {
                 .padding(.vertical, 10)
                 .onChange(of: type) { _, newType in
                     selectedSymbol = newType == .good ? Habit.goodSymbols[0] : Habit.badSymbols[0]
-                    selectedColor  = newType == .good ? "#E8784D" : "#E05252"
                 }
             }
         }
@@ -242,15 +265,32 @@ struct AddHabitView: View {
     // MARK: - Save
 
     private func save() {
-        context.insert(Habit(
-            name: name.trimmingCharacters(in: .whitespaces),
-            type: type,
-            correlatedCategoryName: correlatedCategoryName,
-            symbolName: selectedSymbol,
-            colorHex: selectedColor,
-            dailyGoal: dailyGoal,
-            weeklyGoal: weeklyGoal
-        ))
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        // Mirror the tile's solid color into colorHex so the widget (which reads
+        // colorHex) stays visually in sync until Phase 6.
+        let solidHex = HabitTileColor.by(id: selectedTileID).solidHex
+
+        if let habit = editingHabit {
+            habit.name = trimmed
+            habit.type = type
+            habit.correlatedCategoryName = correlatedCategoryName
+            habit.symbolName = selectedSymbol
+            habit.colorHex = solidHex
+            habit.tileColorID = selectedTileID
+            habit.dailyGoal = type == .good ? max(dailyGoal, 0) : 0
+            habit.weeklyGoal = weeklyGoal
+        } else {
+            context.insert(Habit(
+                name: trimmed,
+                type: type,
+                correlatedCategoryName: correlatedCategoryName,
+                symbolName: selectedSymbol,
+                colorHex: solidHex,
+                tileColorID: selectedTileID,
+                dailyGoal: dailyGoal,
+                weeklyGoal: weeklyGoal
+            ))
+        }
         try? context.save()
         WidgetSync.refresh()
         dismiss()

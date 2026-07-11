@@ -10,6 +10,7 @@ struct HabitsView: View {
 
     @State private var showingAddHabit = false
     @State private var selectedHabit: Habit?
+    @State private var editingHabit: Habit?
     @State private var habitToDelete: Habit?
     @State private var filter: HabitFilter = .all
     @State private var sort: HabitSort = .streak
@@ -83,6 +84,7 @@ struct HabitsView: View {
             }
         }
         .sheet(isPresented: $showingAddHabit) { AddHabitView() }
+        .sheet(item: $editingHabit) { AddHabitView(editingHabit: $0) }
         .navigationDestination(item: $selectedHabit) { HabitDetailView(habit: $0) }
         .alert(
             "Delete \(habitToDelete?.name ?? "habit")?",
@@ -111,12 +113,13 @@ struct HabitsView: View {
         HStack(spacing: 0) {
             VStack(spacing: 8) {
                 ZStack {
+                    // Conic accent ring with a punched (unfilled) center — §4.
                     Circle()
-                        .stroke(theme.deep, lineWidth: 9)
+                        .stroke(theme.track, lineWidth: 9)
                     Circle()
                         .trim(from: 0, to: overallRate)
                         .stroke(
-                            theme.accentGradient,
+                            theme.ringGradient,
                             style: StrokeStyle(lineWidth: 9, lineCap: .round)
                         )
                         .rotationEffect(.degrees(-90))
@@ -134,7 +137,7 @@ struct HabitsView: View {
 
             VStack(spacing: 4) {
                 Text("\(totalGoodToday)")
-                    .font(.system(size: 32, weight: .bold, design: .rounded))
+                    .font(.cadNumber(32))
                     .foregroundColor(theme.accent)
                     .contentTransition(.numericText())
                 Text("good logged").font(.caption2).foregroundColor(.secondary)
@@ -145,7 +148,7 @@ struct HabitsView: View {
 
             VStack(spacing: 4) {
                 Text("\(totalBadToday)")
-                    .font(.system(size: 32, weight: .bold, design: .rounded))
+                    .font(.cadNumber(32))
                     .foregroundColor(totalBadToday > 0 ? .red.opacity(0.8) : .secondary)
                     .contentTransition(.numericText())
                 Text("bad tracked").font(.caption2).foregroundColor(.secondary)
@@ -167,15 +170,15 @@ struct HabitsView: View {
                         withAnimation(.spring(duration: 0.2)) { filter = f }
                     } label: {
                         Text(f.rawValue)
-                            .font(.caption.weight(.semibold))
+                            .font(.cadFootnote)
                             .padding(.horizontal, 10).padding(.vertical, 6)
-                            .background(filter == f ? AnyShapeStyle(theme.accentGradient) : AnyShapeStyle(Color.clear))
-                            .foregroundColor(filter == f ? .white : .secondary)
+                            .background(filter == f ? AnyShapeStyle(theme.pillGradient) : AnyShapeStyle(Color.clear))
+                            .foregroundColor(filter == f ? .white : theme.chipText)
                     }
                     .buttonStyle(.plain)
                 }
             }
-            .background(theme.deep)
+            .background(theme.chipBg)
             .clipShape(Capsule())
 
             Spacer()
@@ -192,12 +195,12 @@ struct HabitsView: View {
             } label: {
                 HStack(spacing: 5) {
                     Image(systemName: sort.icon).font(.caption)
-                    Text(sort.rawValue).font(.caption.weight(.semibold))
+                    Text(sort.rawValue).font(.cadFootnote)
                     Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
                 }
                 .foregroundColor(theme.accent)
                 .padding(.horizontal, 12).padding(.vertical, 7)
-                .background(theme.deep)
+                .background(theme.chipBg)
                 .clipShape(Capsule())
             }
         }
@@ -217,6 +220,7 @@ struct HabitsView: View {
                 HabitCard(habit: habit, compact: compact) { selectedHabit = habit }
                     .contextMenu {
                         Button { selectedHabit = habit } label: { Label("View Details", systemImage: "chart.bar.fill") }
+                        Button { editingHabit = habit } label: { Label("Edit", systemImage: "pencil") }
                         Divider()
                         // Confirmed below — one stray tap must not destroy
                         // the habit's full history (UI_REVIEW §2).
@@ -234,24 +238,25 @@ struct HabitsView: View {
         VStack(spacing: 18) {
             ZStack {
                 Circle()
-                    .fill(theme.accent.opacity(0.12))
+                    .fill(theme.emptyOrb)
                     .frame(width: 90, height: 90)
                 Image(systemName: "bolt.heart.fill")
                     .font(.system(size: 40))
                     .foregroundColor(theme.accent)
             }
             Text("No habits yet")
-                .font(.headline).foregroundColor(.secondary)
+                .font(.cadHeadline).foregroundColor(.secondary)
             Text("Start tracking what you want to build — and what you want to break.")
                 .font(.subheadline).foregroundColor(.secondary)
                 .multilineTextAlignment(.center).padding(.horizontal, 40)
             Button { showingAddHabit = true } label: {
                 Label("Add your first habit", systemImage: "plus")
-                    .font(.subheadline.weight(.semibold))
+                    .font(.cadFootnote)
                     .foregroundColor(.white)
                     .padding(.horizontal, 24).padding(.vertical, 12)
-                    .background(theme.accentGradient)
+                    .background(theme.pillGradient)
                     .clipShape(Capsule())
+                    .shadow(color: theme.pillGlow, radius: 10, y: 4)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -267,7 +272,11 @@ struct HabitCard: View {
     let onDetail: () -> Void
     @Environment(\.modelContext) private var context
 
-    private var accent:      Color { Color(hex: habit.colorHex) }
+    /// Per-habit tile palette (CADENCE_DESIGN_SYSTEM §4/§5), resolved for the
+    /// active surface. `accent` is its icon color — the single flat hue used by
+    /// streaks, counts, and shadows.
+    private var tile:        HabitTileColor.Tokens { HabitTileColor.by(id: habit.tileColorID).tokens(dark: theme.isDark) }
+    private var accent:      Color { tile.icon }
     private var todayCount:  Int   { habit.count() }
     private var dailyProg:   Double {
         guard habit.type == .good, habit.dailyGoal > 0 else { return 0 }
@@ -303,10 +312,10 @@ struct HabitCard: View {
             // Icon badge
             ZStack {
                 RoundedRectangle(cornerRadius: compact ? 10 : 12)
-                    .fill(accent.opacity(0.13))
+                    .fill(tile.tileGradient)
                 Image(systemName: habit.symbolName)
                     .font(.system(size: compact ? 16 : 20, weight: .semibold))
-                    .foregroundColor(accent)
+                    .foregroundColor(tile.icon)
             }
             .frame(width: compact ? 36 : 46, height: compact ? 36 : 46)
 
@@ -358,7 +367,7 @@ struct HabitCard: View {
                 } label: {
                     Image(systemName: "plus.circle.fill")
                         .font(.system(size: compact ? 24 : 28))
-                        .foregroundColor(accent)
+                        .foregroundStyle(tile.buttonGradient)
                 }
                 .buttonStyle(.plain)
             }
@@ -383,8 +392,7 @@ struct HabitCard: View {
                     RoundedRectangle(cornerRadius: 4)
                         .fill(dailyDone
                               ? AnyShapeStyle(Color.green)
-                              : AnyShapeStyle(LinearGradient(colors: [accent.opacity(0.55), accent],
-                                                             startPoint: .leading, endPoint: .trailing)))
+                              : AnyShapeStyle(tile.buttonGradient))
                         .frame(width: geo.size.width * dailyProg)
                         .animation(.easeOut(duration: 0.3), value: dailyProg)
                 }
@@ -412,8 +420,8 @@ struct HabitCard: View {
                     RoundedRectangle(cornerRadius: 4)
                         .fill(weeklyDone
                               ? AnyShapeStyle(Color.green)
-                              : AnyShapeStyle(LinearGradient(colors: [accent.opacity(0.35), accent.opacity(0.7)],
-                                                             startPoint: .leading, endPoint: .trailing)))
+                              : AnyShapeStyle(tile.buttonGradient))
+                        .opacity(weeklyDone ? 1 : 0.7)
                         .frame(width: geo.size.width * weeklyProg)
                         .animation(.easeOut(duration: 0.3), value: weeklyProg)
                 }

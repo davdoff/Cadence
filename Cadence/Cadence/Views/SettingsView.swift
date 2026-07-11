@@ -19,6 +19,7 @@ struct SettingsView: View {
     // Personalisation (AppStorage = UserDefaults)
     @AppStorage("greetingName")    private var greetingName    = ""
     @AppStorage("accentColorHex")  private var accentColorHex = "#E8784D"
+    @AppStorage("themeMode")       private var themeModeRaw   = ThemeMode.system.rawValue
 
     private static let themeColors: [(name: String, hex: String)] = [
         ("Flame",   "#E8784D"),
@@ -54,6 +55,20 @@ struct SettingsView: View {
                                 }
                             }
                             .padding(.vertical, 4)
+                        }
+                    }
+                    .padding(.vertical, 4)
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label("Appearance", systemImage: "circle.lefthalf.filled")
+                        Picker("Appearance", selection: $themeModeRaw) {
+                            ForEach(ThemeMode.allCases) { mode in
+                                Label(mode.label, systemImage: mode.symbol).tag(mode.rawValue)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .onChange(of: themeModeRaw) { _, newValue in
+                            prefs?.themeModeRaw = newValue
                         }
                     }
                     .padding(.vertical, 4)
