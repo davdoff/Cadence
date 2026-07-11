@@ -10,6 +10,35 @@ struct NotificationService {
             .requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
     }
 
+    // MARK: - Action buttons
+
+    /// Identifiers for the Start / Postpone / Skip action category attached to
+    /// start-time notifications. Handled by `NotificationDelegate`.
+    enum Action {
+        static let category = "EVENT_ACTIONS"
+        static let start    = "EVENT_START"
+        static let postpone = "EVENT_POSTPONE"
+        static let skip     = "EVENT_SKIP"
+    }
+
+    /// Registers the Start / Postpone 15m / Skip buttons. Called once at launch.
+    /// Start opens the app (to show the running timer); Postpone and Skip run in
+    /// the background without launching the UI.
+    static func registerCategories() {
+        let start = UNNotificationAction(
+            identifier: Action.start, title: "Start", options: [.foreground])
+        let postpone = UNNotificationAction(
+            identifier: Action.postpone, title: "Postpone 15m", options: [])
+        let skip = UNNotificationAction(
+            identifier: Action.skip, title: "Skip", options: [.destructive])
+        let category = UNNotificationCategory(
+            identifier: Action.category,
+            actions: [start, postpone, skip],
+            intentIdentifiers: [],
+            options: [])
+        UNUserNotificationCenter.current().setNotificationCategories([category])
+    }
+
     // MARK: - General Event Notifications
 
     /// Schedules a reminder N minutes before the event starts. Returns the identifier.
@@ -23,6 +52,12 @@ struct NotificationService {
         content.title = event.title
         content.body = reminderMinutes == 0 ? "Starting now" : "Starting in \(reminderMinutes) min"
         content.sound = .default
+        // A zero-lead reminder fires exactly at start, so it doubles as the
+        // start alert and carries the Start / Postpone / Skip actions.
+        if reminderMinutes == 0 {
+            content.categoryIdentifier = Action.category
+            content.userInfo = ["eventID": event.id.uuidString]
+        }
 
         let comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: fireDate)
         let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
@@ -43,6 +78,8 @@ struct NotificationService {
         content.title = event.title
         content.body = "Starting now"
         content.sound = .default
+        content.categoryIdentifier = Action.category
+        content.userInfo = ["eventID": event.id.uuidString]
 
         let comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: event.startTime)
         let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
@@ -67,6 +104,28 @@ struct NotificationService {
         UNUserNotificationCenter.current().add(
             UNNotificationRequest(identifier: identifier, content: content, trigger: trigger)
         )
+    }
+
+    /// Fires when a manually-started event's timer completes (start + planned
+    /// duration). The app auto-marks the event complete; this is just the
+    /// heads-up when it happens while the app is closed. Scheduled the moment
+    /// the user taps Start. Returns the identifier.
+    @discardableResult
+    func scheduleEventCompletionAlert(for event: Event) -> String {
+        let identifier = "event-finished-\(event.id.uuidString)"
+        guard let fireDate = event.finishTime, fireDate > Date.now else { return identifier }
+
+        let content = UNMutableNotificationContent()
+        content.title = "\(event.title) — done!"
+        content.body = "Nice work. Marked complete."
+        content.sound = .default
+
+        let comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute, .second], from: fireDate)
+        let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
+        UNUserNotificationCenter.current().add(
+            UNNotificationRequest(identifier: identifier, content: content, trigger: trigger)
+        )
+        return identifier
     }
 
     /// Fires `days` days after event end time, nudging the user to reschedule a missed event.
@@ -95,6 +154,7 @@ struct NotificationService {
             "event-reminder-\(event.id.uuidString)",
             "event-start-\(event.id.uuidString)",
             "event-missed-\(event.id.uuidString)",
+            "event-finished-\(event.id.uuidString)",
             "event-reschedule-\(event.id.uuidString)"
         ])
     }

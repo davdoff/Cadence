@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import EventKit
+import UserNotifications
 
 @main
 struct CadenceApp: App {
@@ -8,6 +9,17 @@ struct CadenceApp: App {
         SharedModelContainer.migrateLegacyStoreIfNeeded()
         return SharedModelContainer.make()
     }()
+
+    // Retains the notification-center delegate for the app's lifetime (the
+    // center holds it weakly). Handles the Start / Postpone / Skip buttons.
+    private let notificationDelegate: NotificationDelegate
+
+    init() {
+        let delegate = NotificationDelegate(container: container)
+        self.notificationDelegate = delegate
+        UNUserNotificationCenter.current().delegate = delegate
+        NotificationService.registerCategories()
+    }
 
     var body: some Scene {
         WindowGroup {

@@ -274,6 +274,25 @@ extension Theme {
     /// background, so the active-icon "pill chip" would need a fully custom bar
     /// — intentionally left out to keep navigation stock.)
     func configureTabBarAppearance() {
+        let appearance = makeTabBarAppearance()
+
+        // The `appearance()` proxy only styles tab bars created *after* this
+        // point, so it covers first launch and future windows.
+        UITabBar.appearance().standardAppearance = appearance
+        UITabBar.appearance().scrollEdgeAppearance = appearance
+
+        // …but the bar already on screen keeps its old appearance until it's
+        // rebuilt (app restart). On a live theme/surface switch nothing gets
+        // rebuilt, which left the bar stuck dark until relaunch. Push the new
+        // appearance onto the live instances too so the change is immediate.
+        for tabBar in Self.liveTabBars() {
+            tabBar.standardAppearance = appearance
+            tabBar.scrollEdgeAppearance = appearance
+        }
+    }
+
+    /// Builds the `UITabBarAppearance` for the current accent + surface.
+    private func makeTabBarAppearance() -> UITabBarAppearance {
         let appearance = UITabBarAppearance()
         appearance.configureWithDefaultBackground()
         // Pin the blur + tint to the app's own surface. Otherwise the default
@@ -295,9 +314,26 @@ extension Theme {
             item.selected.iconColor = selected
             item.selected.titleTextAttributes = [.foregroundColor: selected]
         }
+        return appearance
+    }
 
-        UITabBar.appearance().standardAppearance = appearance
-        UITabBar.appearance().scrollEdgeAppearance = appearance
+    /// Every `UITabBar` currently in the window hierarchy across all connected
+    /// scenes, so a live appearance update can reach the bar that's on screen.
+    private static func liveTabBars() -> [UITabBar] {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .flatMap { tabBars(in: $0) }
+    }
+
+    /// Recursively collects `UITabBar` subviews under a view.
+    private static func tabBars(in view: UIView) -> [UITabBar] {
+        var found: [UITabBar] = []
+        for subview in view.subviews {
+            if let bar = subview as? UITabBar { found.append(bar) }
+            found.append(contentsOf: tabBars(in: subview))
+        }
+        return found
     }
 }
 #endif

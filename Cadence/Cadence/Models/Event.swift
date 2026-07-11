@@ -17,6 +17,10 @@ final class Event {
     // enabling "remove all events from this source".
     var externalIdentifier: String?
     var importSourceID: String?
+    // Set when the user taps "Start" on the event in Today. Drives the live
+    // in-progress countdown; nil until started. Defaulted inline so existing
+    // rows migrate to nil without a schema change.
+    var startedAt: Date? = nil
 
     @Relationship
     var category: Category?
@@ -44,4 +48,11 @@ final class Event {
     var duration: TimeInterval { endTime.timeIntervalSince(startTime) }
     var isUpcoming: Bool { startTime > Date.now }
     var isInProgress: Bool { startTime <= Date.now && endTime > Date.now }
+
+    /// True while a manually-started event's timer is still relevant (started
+    /// and not yet marked complete/missed).
+    var isRunning: Bool { startedAt != nil && status == .pending }
+    /// When a started event's countdown completes: the planned duration measured
+    /// from the moment Start was tapped (not the scheduled end).
+    var finishTime: Date? { startedAt.map { $0.addingTimeInterval(duration) } }
 }

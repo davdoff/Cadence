@@ -6,12 +6,14 @@ struct TodayView: View {
     @Query(sort: \Event.startTime) private var allEvents: [Event]
     @Query private var habits: [Habit]
     @Environment(\.modelContext) private var context
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage("greetingName") private var greetingName = ""
 
     @State private var showingAddEvent = false
     @State private var showingAIInput  = false
-    @State private var detailEvent: Event?
     @State private var statusFilter: StatusFilter = .all
+    // Which pending event has its "Start" pill revealed (only one at a time).
+    @State private var revealedEventID: UUID?
 
     enum StatusFilter: String, CaseIterable {
         case all = "All", pending = "Up Next", done = "Done", missed = "Missed"
@@ -100,7 +102,12 @@ struct TodayView: View {
         .toolbarBackground(theme.background, for: .navigationBar)
         .sheet(isPresented: $showingAddEvent) { AddEventView() }
         .sheet(isPresented: $showingAIInput)  { AIInputView()  }
-        .navigationDestination(item: $detailEvent) { EventDetailView(event: $0) }
+        // Complete any started events whose timer elapsed while we weren't
+        // watching (app backgrounded / closed).
+        .onAppear { completeElapsedRunningEvents() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { completeElapsedRunningEvents() }
+        }
     }
 
     // MARK: - Header
@@ -200,9 +207,15 @@ struct TodayView: View {
     private func timeSection(_ label: String, events: [Event]) -> some View {
         Section {
             ForEach(events) { event in
-                EventRowView(event: event)
-                    .contentShape(Rectangle())
-                    .onTapGesture { detailEvent = event }
+                StartableEventRow(
+                    event: event,
+                    isRevealed: revealedEventID == event.id,
+                    onReveal: { withAnimation(.spring(duration: 0.3)) {
+                        revealedEventID = (revealedEventID == event.id) ? nil : event.id
+                    } },
+                    onStart:  { start(event) },
+                    onFinish: { complete(event) }
+                )
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
                     .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
@@ -292,6 +305,34 @@ struct TodayView: View {
 
     // MARK: - Helpers
 
+    /// Marks the event as started: stamps `startedAt`, schedules the
+    /// "time's up" notification, and collapses the reveal. Status stays
+    /// `.pending` — the user still marks done/missed when finished.
+    private func start(_ event: Event) {
+        event.startedAt = .now
+        NotificationService().scheduleEventCompletionAlert(for: event)
+        try? context.save()
+        WidgetSync.refresh()
+        withAnimation(.spring(duration: 0.3)) { revealedEventID = nil }
+    }
+
+    /// Auto-completes a running event when its timer ends (reuses the
+    /// swipe-to-done path). Guarded so the finish-`.task` and the scenePhase
+    /// reconciliation can't complete the same event twice.
+    private func complete(_ event: Event) {
+        guard event.isRunning else { return }
+        mark(event, .completed)
+    }
+
+    /// Completes any started event whose countdown already elapsed while the
+    /// app wasn't foreground. Runs on appear and when the app becomes active.
+    private func completeElapsedRunningEvents() {
+        let now = Date.now
+        for event in allEvents where event.isRunning {
+            if let finish = event.finishTime, finish <= now { mark(event, .completed) }
+        }
+    }
+
     private func mark(_ event: Event, _ status: EventStatus) {
         let svc = NotificationService()
         event.status = status
@@ -318,5 +359,74 @@ struct TodayView: View {
     private var todayTitle: String {
         let f = DateFormatter(); f.dateFormat = "EEEE, MMM d"
         return f.string(from: .now)
+    }
+}
+
+// MARK: - Startable row
+
+/// Today's event row with the tap-to-start affordance. Tapping a pending event
+/// springs the card narrower and reveals a "Start" pill; tapping Start swaps the
+/// pill for a live countdown that auto-completes the event when it hits zero.
+/// (Detail is intentionally not wired here — Today is the live surface.)
+private struct StartableEventRow: View {
+    @Environment(\.theme) private var theme
+    let event: Event
+    let isRevealed: Bool
+    let onReveal: () -> Void
+    let onStart: () -> Void
+    let onFinish: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            EventRowView(event: event)
+                .contentShape(Rectangle())
+                .onTapGesture { if !event.isRunning { onReveal() } }
+
+            if event.isRunning, let finish = event.finishTime {
+                runningTimer(from: event.startedAt ?? .now, to: finish)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            } else if isRevealed {
+                startButton
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
+        }
+        .animation(.spring(duration: 0.3), value: isRevealed)
+        .animation(.spring(duration: 0.3), value: event.isRunning)
+        // Live auto-complete while the app is foreground and this row is on
+        // screen: wait out the remaining time, then flip to complete. Restarts
+        // if the event is (re)started. Off-screen/backgrounded finishes are
+        // handled by TodayView's scenePhase reconciliation instead.
+        .task(id: event.startedAt) {
+            guard event.isRunning, let finish = event.finishTime else { return }
+            let delay = finish.timeIntervalSinceNow
+            if delay > 0 { try? await Task.sleep(for: .seconds(delay)) }
+            if !Task.isCancelled, event.isRunning { onFinish() }
+        }
+    }
+
+    private var startButton: some View {
+        Button(action: onStart) {
+            Label("Start", systemImage: "play.fill")
+                .font(.caption.weight(.bold))
+                .foregroundColor(.white)
+                .padding(.horizontal, 14).padding(.vertical, 12)
+                .background(theme.pillGradient)
+                .clipShape(Capsule())
+                .shadow(color: theme.pillGlow, radius: 6, y: 2)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Self-updating MM:SS countdown — `Text(timerInterval:)` ticks on its own
+    /// with no timer or state, exactly the render-driven model we want.
+    private func runningTimer(from start: Date, to finish: Date) -> some View {
+        Text(timerInterval: start...finish, countsDown: true)
+            .font(.cadBodyStrong.monospacedDigit())
+            .foregroundColor(theme.accent)
+            .multilineTextAlignment(.center)
+            .frame(minWidth: 58)
+            .padding(.horizontal, 10).padding(.vertical, 12)
+            .background(theme.chipBg)
+            .clipShape(Capsule())
     }
 }
