@@ -124,7 +124,7 @@ struct GeneratePlanSheet: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("What should this period achieve?")
                 .font(.caption.weight(.semibold))
-                .foregroundColor(.secondary)
+                .foregroundColor(theme.text2)
             TextField("e.g. 3 workouts and 4h of exam prep, evenings preferred", text: $goals, axis: .vertical)
                 .lineLimit(2...5)
         }

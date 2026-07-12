@@ -152,14 +152,16 @@ struct AIInputView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text(draft.title)
                     .font(.headline)
+                    .foregroundColor(theme.text)
                 Text(formatSlot(start: draft.start, end: draft.end))
                     .font(.subheadline)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(theme.text2)
                 if !draft.categoryName.isEmpty {
                     Text(draft.categoryName)
                         .font(.caption)
+                        .foregroundColor(theme.chipText)
                         .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(theme.light.opacity(0.25))
+                        .background(theme.chipBg)
                         .clipShape(Capsule())
                 }
             }
@@ -171,8 +173,7 @@ struct AIInputView: View {
             confirmButton("Confirm & Add") { insertDrafts([draft]) }
         }
         .padding()
-        .background(theme.deep)
-        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .cardStyle()
     }
 
     private func conflictCard(interpretation: String, reason: String, alternatives: [EventDraft]) -> some View {
@@ -183,7 +184,7 @@ struct AIInputView: View {
 
             Text(reason)
                 .font(.subheadline)
-                .foregroundColor(.secondary)
+                .foregroundColor(theme.text2)
                 .padding()
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(theme.cardSurface)
@@ -192,7 +193,7 @@ struct AIInputView: View {
             if !alternatives.isEmpty {
                 Text("Available slots")
                     .font(.caption.weight(.semibold))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(theme.text2)
                 // Keep the server's title; insertDrafts falls back to the
                 // typed request only when it's empty (UI_REVIEW §1.4).
                 ForEach(Array(alternatives.enumerated()), id: \.offset) { _, slot in
@@ -201,8 +202,7 @@ struct AIInputView: View {
             }
         }
         .padding()
-        .background(theme.deep)
-        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .cardStyle()
     }
 
     private func suggestCard(interpretation: String, _ drafts: [EventDraft]) -> some View {
@@ -214,8 +214,7 @@ struct AIInputView: View {
             }
         }
         .padding()
-        .background(theme.deep)
-        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .cardStyle()
     }
 
     /// Shared preview for move and reschedule: old time → new time + confirm.
@@ -230,12 +229,14 @@ struct AIInputView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(event.title)
                         .font(.headline)
+                        .foregroundColor(theme.text)
                     Text(formatSlot(start: event.startTime, end: event.endTime))
                         .font(.subheadline)
                         .strikethrough()
-                        .foregroundColor(.secondary)
+                        .foregroundColor(theme.text2)
                     Text(formatSlot(start: newStart, end: newEnd))
                         .font(.subheadline.weight(.semibold))
+                        .foregroundColor(theme.text)
                 }
                 .padding()
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -249,7 +250,7 @@ struct AIInputView: View {
                 if !alternatives.isEmpty {
                     Text("Other options")
                         .font(.caption.weight(.semibold))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(theme.text2)
                     ForEach(Array(alternatives.enumerated()), id: \.offset) { _, slot in
                         Button {
                             applyMoves([PlannedMove(targetEventID: targetID, newStart: slot.start, newEnd: slot.end)])
@@ -261,12 +262,11 @@ struct AIInputView: View {
             } else {
                 Text("That event is no longer on your schedule.")
                     .font(.subheadline)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(theme.text2)
             }
         }
         .padding()
-        .background(theme.deep)
-        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .cardStyle()
     }
 
     private func reorganizeCard(interpretation: String, moves: [PlannedMove], displaced: [UUID]) -> some View {
@@ -278,9 +278,10 @@ struct AIInputView: View {
                     if let event = allEvents.first(where: { $0.id == move.targetEventID }) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(event.title).font(.subheadline.weight(.semibold))
+                                .foregroundColor(theme.text)
                             Text("\(formatSlot(start: event.startTime, end: event.endTime)) → \(formatSlot(start: move.newStart, end: move.newEnd))")
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundColor(theme.text2)
                         }
                     }
                 }
@@ -293,7 +294,7 @@ struct AIInputView: View {
                         if let event = allEvents.first(where: { $0.id == id }) {
                             Text(event.title)
                                 .font(.caption)
-                                .foregroundColor(.secondary)
+                                .foregroundColor(theme.text2)
                         }
                     }
                 }
@@ -306,8 +307,7 @@ struct AIInputView: View {
             confirmButton("Apply Changes") { applyMoves(moves, displacing: displaced) }
         }
         .padding()
-        .background(theme.deep)
-        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .cardStyle()
     }
 
     private func generateCard(interpretation: String, drafts: [EventDraft]) -> some View {
@@ -318,9 +318,10 @@ struct AIInputView: View {
                 ForEach(Array(drafts.enumerated()), id: \.offset) { _, draft in
                     VStack(alignment: .leading, spacing: 2) {
                         Text(draft.title).font(.subheadline.weight(.semibold))
+                            .foregroundColor(theme.text)
                         Text(formatSlot(start: draft.start, end: draft.end))
                             .font(.caption)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(theme.text2)
                     }
                 }
             }
@@ -332,21 +333,21 @@ struct AIInputView: View {
             confirmButton("Add All (\(drafts.count))") { insertDrafts(drafts) }
         }
         .padding()
-        .background(theme.deep)
-        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .cardStyle()
     }
 
     private func clarifyCard(question: String, options: [String]) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             Label(question, systemImage: "questionmark.circle.fill")
                 .font(.subheadline.weight(.semibold))
+                .foregroundColor(theme.text)
 
             ForEach(options, id: \.self) { option in
                 Button {
                     answerClarify(option)
                 } label: {
                     HStack {
-                        Text(option).foregroundColor(.primary)
+                        Text(option).foregroundColor(theme.text)
                         Spacer()
                         Image(systemName: "arrow.up.circle")
                             .foregroundColor(theme.accent)
@@ -359,11 +360,10 @@ struct AIInputView: View {
 
             Text("Or refine your request above and send again.")
                 .font(.caption)
-                .foregroundColor(.secondary)
+                .foregroundColor(theme.text2)
         }
         .padding()
-        .background(theme.deep)
-        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .cardStyle()
     }
 
     private func confirmButton(_ title: String, action: @escaping () -> Void) -> some View {
@@ -387,7 +387,7 @@ struct AIInputView: View {
             Image(systemName: "clock")
                 .foregroundColor(theme.accent)
             Text(formatSlot(start: start, end: end))
-                .foregroundColor(.primary)
+                .foregroundColor(theme.text)
             Spacer()
             Image(systemName: "plus.circle.fill")
                 .foregroundColor(theme.accent)
@@ -404,7 +404,7 @@ struct AIInputView: View {
             ProgressView().tint(theme.accent).scaleEffect(1.4)
             Text("Thinking…")
                 .font(.subheadline)
-                .foregroundColor(.secondary)
+                .foregroundColor(theme.text2)
         }
         .frame(maxWidth: .infinity)
         .padding(32)
@@ -417,7 +417,7 @@ struct AIInputView: View {
                 .foregroundColor(theme.light)
             Text("Your scheduling secretary: add, move, or reorganize events, or plan whole goals — in plain language.")
                 .font(.subheadline)
-                .foregroundColor(.secondary)
+                .foregroundColor(theme.text2)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 24)
 
@@ -436,7 +436,7 @@ struct AIInputView: View {
                 .foregroundColor(.red.opacity(0.6))
             Text(message)
                 .font(.subheadline)
-                .foregroundColor(.secondary)
+                .foregroundColor(theme.text2)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 24)
         }

@@ -140,7 +140,7 @@ struct ScheduleView: View {
                     Text(mode.rawValue)
                         .font(.cadFootnote)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
+                        .padding(.vertical, 10)
                         .foregroundColor(viewMode == mode ? .white : theme.chipText)
                         .background(
                             viewMode == mode
@@ -150,6 +150,9 @@ struct ScheduleView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 10))
                         .shadow(color: viewMode == mode ? theme.pillGlow.opacity(0.6) : .clear,
                                 radius: 6, y: 2)
+                        // Whole segment (full width + padding) is the tap target,
+                        // not just the label glyphs.
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
@@ -215,6 +218,7 @@ struct ScheduleView: View {
             .background(isSelected ? AnyShapeStyle(theme.pillGradient) : AnyShapeStyle(Color.clear))
             .clipShape(RoundedRectangle(cornerRadius: 14))
             .shadow(color: isSelected ? theme.pillGlow : .clear, radius: 7, y: 3)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
@@ -260,6 +264,8 @@ struct ScheduleView: View {
             HStack {
                 Button { changeMonth(-1) } label: {
                     Image(systemName: "chevron.left").font(.footnote.weight(.semibold))
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
                 Spacer()
                 Text(visibleMonth, format: .dateTime.month(.wide).year())
@@ -267,6 +273,8 @@ struct ScheduleView: View {
                 Spacer()
                 Button { changeMonth(1) } label: {
                     Image(systemName: "chevron.right").font(.footnote.weight(.semibold))
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                 }
             }
             .foregroundColor(theme.accent)
@@ -320,6 +328,7 @@ struct ScheduleView: View {
             .background(isSelected ? AnyShapeStyle(theme.pillGradient) : AnyShapeStyle(Color.clear))
             .clipShape(RoundedRectangle(cornerRadius: 10))
             .shadow(color: isSelected ? theme.pillGlow.opacity(0.7) : .clear, radius: 5, y: 2)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
@@ -415,6 +424,7 @@ struct ScheduleView: View {
             .background(isSelected ? AnyShapeStyle(chipColor) : AnyShapeStyle(theme.chipBg))
             .foregroundColor(isSelected ? .white : theme.chipText)
             .clipShape(Capsule())
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
     }
