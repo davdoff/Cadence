@@ -21,6 +21,11 @@ final class Event {
     // in-progress countdown; nil until started. Defaulted inline so existing
     // rows migrate to nil without a schema change.
     var startedAt: Date? = nil
+    // Groups the occurrences of a recurring event. Native series: the
+    // EventSeries.id (RecurrenceService owns generation). Imported series:
+    // the source's base identifier — no EventSeries row, the source calendar
+    // owns the rule. Defaulted inline for lightweight migration.
+    var seriesID: String? = nil
 
     @Relationship
     var category: Category?
@@ -59,4 +64,6 @@ final class Event {
     /// When a started event's countdown completes: the planned duration measured
     /// from the moment Start was tapped (not the scheduled end).
     var finishTime: Date? { startedAt.map { $0.addingTimeInterval(duration) } }
+    /// One occurrence of a recurring event (native or imported).
+    var isRecurring: Bool { seriesID != nil }
 }

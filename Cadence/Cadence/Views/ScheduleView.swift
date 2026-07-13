@@ -20,6 +20,9 @@ struct ScheduleView: View {
     @State private var editingEvent: Event?
     @State private var detailEvent: Event?
     @State private var showingAddEvent = false
+    /// Swiped-to-delete occurrence of a recurring event, pending the
+    /// "this one / this and future" choice.
+    @State private var seriesDeleteTarget: Event?
     @State private var viewMode: ScheduleMode = .week
 
     // Which week/month the strip and grid are showing. Kept in sync with
@@ -119,6 +122,23 @@ struct ScheduleView: View {
             AddEventView(initialDate: selectedDate)
         }
         .navigationDestination(item: $detailEvent) { EventDetailView(event: $0) }
+        .confirmationDialog(
+            "This is a repeating event.",
+            isPresented: Binding(
+                get: { seriesDeleteTarget != nil },
+                set: { if !$0 { seriesDeleteTarget = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: seriesDeleteTarget
+        ) { event in
+            Button("Delete This Event", role: .destructive) {
+                deleteEvent(event)
+            }
+            Button("Delete This and Future Events", role: .destructive) {
+                RecurrenceService.shared.deleteFuture(from: event, context: context)
+            }
+            Button("Cancel", role: .cancel) {}
+        }
     }
 
     /// Snap the strip and grid to whatever period contains `date`.
@@ -456,7 +476,13 @@ struct ScheduleView: View {
                                                   bottom: compact ? 3 : 5, trailing: 16))
                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                             Button(role: .destructive) {
-                                deleteEvent(event)
+                                // Series occurrences get the "this one / this
+                                // and future" choice instead of instant delete.
+                                if event.isRecurring {
+                                    seriesDeleteTarget = event
+                                } else {
+                                    deleteEvent(event)
+                                }
                             } label: {
                                 Label("Delete", systemImage: "trash")
                             }

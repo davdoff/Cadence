@@ -31,6 +31,9 @@ struct CadenceApp: App {
                     await seedIfNeeded()
                     // Device calendars AND subscription feeds; never prompts.
                     await CalendarImportService.shared.syncAll(context: container.mainContext)
+                    // Extends recurring series to their horizon and schedules
+                    // notifications for occurrences entering the near window.
+                    RecurrenceService.shared.topUp(context: container.mainContext)
                 }
                 // iOS posts this when the underlying calendar database changes —
                 // re-sync imported events (calendar-import.md §3.4). Never prompts.

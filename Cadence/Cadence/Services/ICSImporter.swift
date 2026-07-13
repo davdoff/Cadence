@@ -32,6 +32,7 @@ struct ICSImporter {
                 let end: String
                 let allDay: Bool
                 let externalIdentifier: String
+                let seriesIdentifier: String?
             }
             let events: [Item]
             let feedName: String?
@@ -64,7 +65,8 @@ struct ICSImporter {
                 end: end,
                 isAllDay: item.allDay,
                 externalIdentifier: item.externalIdentifier,
-                categoryHint: response.feedName ?? "Imported"
+                categoryHint: response.feedName ?? "Imported",
+                seriesIdentifier: item.seriesIdentifier
             )
         }
         return FeedResult(feedName: response.feedName, instances: instances)

@@ -40,6 +40,12 @@ struct EventRowView: View {
                 .foregroundColor(.primary)
                 .lineLimit(1)
 
+            if event.isRecurring {
+                Image(systemName: "repeat")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+
             Spacer(minLength: 4)
 
             statusBadge
@@ -64,9 +70,15 @@ struct EventRowView: View {
                 Text(event.title)
                     .font(.cadBodyStrong)
                     .foregroundColor(.primary)
-                Text(timeRange)
-                    .font(.cadCaption)
-                    .foregroundColor(.secondary)
+                HStack(spacing: 5) {
+                    Text(timeRange)
+                    if event.isRecurring {
+                        Image(systemName: "repeat")
+                            .font(.caption2)
+                    }
+                }
+                .font(.cadCaption)
+                .foregroundColor(.secondary)
             }
 
             Spacer()

@@ -77,6 +77,19 @@ struct EventDetailView: View {
                     .cardStyle()
                 }
 
+                if let repeats = recurrenceDescription {
+                    HStack {
+                        Text("Repeats")
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Label(repeats, systemImage: "repeat")
+                            .fontWeight(.medium)
+                    }
+                    .font(.subheadline)
+                    .padding(16)
+                    .cardStyle()
+                }
+
                 if event.status == .pending {
                     markActions
                 }
@@ -152,6 +165,16 @@ struct EventDetailView: View {
     }
 
     // MARK: - Helpers
+
+    /// Nil for one-off events; the rule text for native series; a generic
+    /// label for imported series (the source calendar owns their rule).
+    private var recurrenceDescription: String? {
+        guard event.isRecurring else { return nil }
+        if let series = RecurrenceService.shared.series(for: event, context: context) {
+            return series.rule.displayText
+        }
+        return "From imported calendar"
+    }
 
     private var categoryColor: Color {
         if let hex = event.category?.colorHex {

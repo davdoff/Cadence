@@ -59,13 +59,15 @@ final class EventKitReader {
         )
         return store.events(matching: predicate).compactMap { ek in
             guard let start = ek.startDate, let end = ek.endDate, let calendar = ek.calendar else { return nil }
+            let ids = Self.stableIdentifiers(for: ek)
             return ImportedEventInstance(
                 title: ek.title ?? "Untitled",
                 start: start,
                 end: end,
                 isAllDay: ek.isAllDay,
-                externalIdentifier: Self.stableInstanceIdentifier(for: ek),
-                categoryHint: calendar.title
+                externalIdentifier: ids.external,
+                categoryHint: calendar.title,
+                seriesIdentifier: ids.series
             )
         }
     }
@@ -79,12 +81,14 @@ final class EventKitReader {
     /// suffix the original occurrence date so each expanded instance dedupes
     /// independently on re-sync. occurrenceDate stays fixed even when a single
     /// occurrence is detached and moved, keeping the identifier stable.
-    private static func stableInstanceIdentifier(for ek: EKEvent) -> String {
+    /// The unsuffixed base doubles as the series identifier that groups the
+    /// occurrences; nil for one-off events.
+    private static func stableIdentifiers(for ek: EKEvent) -> (external: String, series: String?) {
         let base = ek.calendarItemExternalIdentifier
             ?? ek.eventIdentifier
             ?? "\(ek.title ?? "?")@\(ek.startDate?.timeIntervalSince1970 ?? 0)"
-        guard ek.hasRecurrenceRules || ek.isDetached else { return base }
+        guard ek.hasRecurrenceRules || ek.isDetached else { return (base, nil) }
         let occurrence = ek.occurrenceDate ?? ek.startDate ?? .distantPast
-        return base + "#" + occurrenceFormatter.string(from: occurrence)
+        return (base + "#" + occurrenceFormatter.string(from: occurrence), base)
     }
 }

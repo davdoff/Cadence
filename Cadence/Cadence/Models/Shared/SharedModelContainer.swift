@@ -9,6 +9,7 @@ enum SharedModelContainer {
 
     static let schema = Schema([
         Event.self,
+        EventSeries.self,
         Category.self,
         Meal.self,
         UserPreferences.self,

@@ -58,7 +58,8 @@ final class ICSImporterTests: XCTestCase {
               "start": "2030-06-15T10:00:00+03:00",
               "end": "2030-06-15T12:00:00+03:00",
               "allDay": false,
-              "externalIdentifier": "uid-123@uni.edu#2030-06-15T10:00:00+03:00" },
+              "externalIdentifier": "uid-123@uni.edu#2030-06-15T10:00:00+03:00",
+              "seriesIdentifier": "uid-123@uni.edu" },
             { "title": "Conference day",
               "start": "2030-06-16T00:00:00+03:00",
               "end": "2030-06-17T00:00:00+03:00",
@@ -79,11 +80,15 @@ final class ICSImporterTests: XCTestCase {
         XCTAssertEqual(lecture.externalIdentifier, "uid-123@uni.edu#2030-06-15T10:00:00+03:00")
         XCTAssertEqual(lecture.categoryHint, "Uni Timetable")
         XCTAssertFalse(lecture.isAllDay)
+        // Recurring occurrences carry the shared base UID for series grouping.
+        XCTAssertEqual(lecture.seriesIdentifier, "uid-123@uni.edu")
         // The offset in the payload maps to the right instant (10:00+03:00 == 07:00Z)
         XCTAssertEqual(lecture.start, ISO8601DateFormatter().date(from: "2030-06-15T07:00:00Z"))
         XCTAssertEqual(lecture.end, ISO8601DateFormatter().date(from: "2030-06-15T09:00:00Z"))
 
         XCTAssertTrue(result.instances[1].isAllDay)
+        // One-off events (and older payloads without the key) decode to nil.
+        XCTAssertNil(result.instances[1].seriesIdentifier)
     }
 
     func testMissingFeedNameFallsBackToImportedHint() async throws {

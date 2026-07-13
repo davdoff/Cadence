@@ -101,28 +101,33 @@ test("expands a mixed feed: UTC, TZID RRULE+EXDATE+override, all-day, floating, 
     assert.equal(fetchedUrl, BASE_REQ.url);
     assert.equal(claudeCalls(), 0); // deterministic endpoint — no AI call
 
+    // seriesIdentifier: the unsuffixed UID shared by every occurrence of a
+    // recurring event (including overrides), null for one-off events.
     assert.deepEqual(body.events, [
       { title: "Algorithms lecture",
         start: "2026-07-08T10:00:00+03:00", end: "2026-07-08T12:00:00+03:00",
-        allDay: false, externalIdentifier: "lecture@uni.edu#2026-07-08T10:00:00+03:00" },
+        allDay: false, externalIdentifier: "lecture@uni.edu#2026-07-08T10:00:00+03:00",
+        seriesIdentifier: "lecture@uni.edu" },
       { title: "UTC standup",
         start: "2026-07-10T20:00:00+03:00", end: "2026-07-10T21:00:00+03:00",
-        allDay: false, externalIdentifier: "utc-1@test" },
+        allDay: false, externalIdentifier: "utc-1@test", seriesIdentifier: null },
       // Floating time = interpreted in the device zone; SUMMARY unfolded.
       { title: "Extremely long floating dinner title that RFC 5545 folds across multiple physical lines",
         start: "2026-07-11T19:00:00+03:00", end: "2026-07-11T20:00:00+03:00",
-        allDay: false, externalIdentifier: "fold-1@test" },
+        allDay: false, externalIdentifier: "fold-1@test", seriesIdentifier: null },
       { title: "Conference day",
         start: "2026-07-15T00:00:00+03:00", end: "2026-07-16T00:00:00+03:00",
-        allDay: true, externalIdentifier: "allday-1@test" },
+        allDay: true, externalIdentifier: "allday-1@test", seriesIdentifier: null },
       // Jul 15 lecture is EXDATE'd; Jul 22 is overridden — moved to 14:00 but
       // keyed by its ORIGINAL occurrence time so re-syncs update in place.
       { title: "Algorithms lecture (moved)",
         start: "2026-07-22T14:00:00+03:00", end: "2026-07-22T16:00:00+03:00",
-        allDay: false, externalIdentifier: "lecture@uni.edu#2026-07-22T10:00:00+03:00" },
+        allDay: false, externalIdentifier: "lecture@uni.edu#2026-07-22T10:00:00+03:00",
+        seriesIdentifier: "lecture@uni.edu" },
       { title: "Algorithms lecture",
         start: "2026-07-29T10:00:00+03:00", end: "2026-07-29T12:00:00+03:00",
-        allDay: false, externalIdentifier: "lecture@uni.edu#2026-07-29T10:00:00+03:00" },
+        allDay: false, externalIdentifier: "lecture@uni.edu#2026-07-29T10:00:00+03:00",
+        seriesIdentifier: "lecture@uni.edu" },
     ]);
   } finally { close(); }
 });
@@ -268,6 +273,9 @@ test("RDATE adds an extra occurrence of a recurring event", async () => {
       "2026-07-11T12:00:00+03:00", // RDATE extra (09:00Z)
       "2026-07-15T20:00:00+03:00", // rule #2
     ]);
+    // RDATE extras belong to the same series as the rule's occurrences.
+    assert.deepEqual(body.events.map((e) => e.seriesIdentifier),
+      ["rdate-1@test", "rdate-1@test", "rdate-1@test"]);
   } finally { close(); }
 });
 

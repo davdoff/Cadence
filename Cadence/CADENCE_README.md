@@ -45,6 +45,15 @@ event. No AI involved anywhere in the import.
   EventKit's `calendarItemExternalIdentifier`, suffixed with the occurrence
   date for recurring events) and `importSourceID` (which calendar/feed);
   both nil for manual/AI events. `source = .imported`.
+- **Recurring imports**: occurrences of a recurring source event share a
+  `seriesID` (the unsuffixed base identifier; the ICS DTOs carry it as
+  `seriesIdentifier`, null for one-offs). That powers the repeat badge,
+  the detail view's "From imported calendar" row, and "Delete this and
+  future events" — which records a **series tombstone**
+  (`series:<id>@<ISO cutoff>` in the same tombstone list) so occurrences
+  the sliding window hasn't fetched yet stay dead too. Re-syncing backfills
+  `seriesID` onto events imported before this existed. Imported events never
+  get an `EventSeries` row — the source calendar owns the rule (§2.1).
 - **Sync lifecycle** (90-day window): on launch, on `.EKEventStoreChanged`
   (debounced), on manual "Sync now", and when connecting a calendar. Re-sync
   updates title/times in place by `externalIdentifier`, preserves
@@ -73,7 +82,7 @@ event. No AI involved anywhere in the import.
 ### 2. Event Management
 Each event supports:
 - Delete single occurrence
-- Delete all occurrences (recurring events)
+- Delete this-and-future occurrences (recurring events — §2.1)
 - Edit title, date, time, duration, and category from the event detail view (implemented — reuses the Add Event form in edit mode; `id`/`source`/`status` are never changed, and time changes cancel and reschedule the notification)
 - Mark as **Completed** or **Missed**
 - Assign to a **Category**
@@ -111,6 +120,45 @@ Each event supports:
   `Services/DialGeometry.swift` enum, unit-tested in `DialGeometryTests`.
   The component is presentation-only (binds two `Date`s, edits time-of-day in
   place) and reusable for other time-pair inputs later.
+
+#### 2.1 Recurring events (implemented)
+
+Add/Edit Event has a **Repeats** section: frequency (Never / Daily / Weekly /
+Monthly / Yearly), an interval stepper ("Every 3 days" covers arbitrary
+every-X cadences), and an optional end date.
+
+- **Materialized, not virtual**: a native series is an `EventSeries` model
+  row (rule + title/category/duration template + `anchorStart` +
+  `materializedUntil` high-water mark; member of the shared schema like all
+  models) whose occurrences are generated as real `Event` rows tagged with
+  `seriesID`. Same shape as calendar import, so the free-slot finder,
+  per-occurrence statuses, the AI planner, notifications, and widgets all
+  work on plain events with zero special-casing.
+- **`RecurrenceService`** owns the lifecycle: pure `occurrenceStarts` math
+  (anchor + k·step via `Calendar`, so wall-clock times survive DST and
+  monthly rules never drift through short months — unit-tested in
+  `RecurrenceServiceTests`), `createSeries`, and a launch-time `topUp` that
+  extends every series to its rolling horizon (**90 days**; yearly rules
+  400 so the next annual occurrence exists). Top-up only generates past
+  `materializedUntil`, so locally deleted occurrences never resurrect.
+- **Notification cap**: iOS keeps only the 64 soonest pending local
+  notifications, so series occurrences get their reminder/start/missed set
+  only once they're ≤ 7 days out (`notificationIdentifier == nil` marks
+  "not yet scheduled"); `topUp` back-fills each launch. Known trade-off: if
+  the app isn't opened for over a week, series reminders past that pause
+  until the next launch.
+- **Edit semantics**: time/title/category edits apply to the single opened
+  occurrence; changing the **rule** applies to this-and-future (the edited
+  occurrence becomes the new anchor/template, later pending occurrences are
+  regenerated). Setting the rule back to Never ends the series in place.
+- **Delete semantics**: swipe-deleting a series occurrence in Schedule asks
+  "Delete This Event" vs "Delete This and Future Events"; the latter caps
+  the series' `endDate` (native) or writes a series tombstone (imported).
+  Completed/missed history is never touched. The missed-tray delete stays
+  occurrence-only on purpose.
+- **UI**: rows show a small `repeat` glyph; the detail view has a Repeats
+  card ("Every 2 weeks · until Jan 5", or "From imported calendar").
+- Conflict checking on save still covers only the first occurrence.
 
 ### 3. Categories
 - User-defined categories applied to all events

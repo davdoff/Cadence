@@ -36,9 +36,10 @@ enum EventSource: String, Codable {
     case manual, ai, imported
 }
 
-struct RecurrenceRule: Codable {
-    enum Frequency: String, Codable {
-        case daily, weekly, monthly
+struct RecurrenceRule: Codable, Equatable {
+    enum Frequency: String, Codable, CaseIterable {
+        // Shared with the widget target — append new cases only, never reorder.
+        case daily, weekly, monthly, yearly
     }
     var frequency: Frequency
     var interval: Int       // e.g. 2 = every 2 weeks

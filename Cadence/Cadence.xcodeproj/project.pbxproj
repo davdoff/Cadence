@@ -75,6 +75,7 @@
 				Models/CalendarImportSource.swift,
 				Models/Category.swift,
 				Models/Event.swift,
+				Models/EventSeries.swift,
 				Models/Habit.swift,
 				Models/Meal.swift,
 				Models/Shared/AppGroup.swift,

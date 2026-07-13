@@ -11,6 +11,10 @@ struct ImportedEventInstance {
     let isAllDay: Bool
     let externalIdentifier: String   // stable per occurrence across re-syncs
     let categoryHint: String         // calendar title or feed name (§3.3 mapping)
+    // Base identifier shared by every occurrence of a recurring source event;
+    // nil for one-off events. Becomes Event.seriesID so the app can group and
+    // badge the occurrences — the source still owns the rule and expansion.
+    let seriesIdentifier: String?
 }
 
 /// Calendar import orchestration (calendar-import.md §3–§4): runs sync passes
@@ -116,6 +120,7 @@ final class CalendarImportService {
         let byExternalID = Dictionary(existing.map { ($0.externalIdentifier ?? "", $0) },
                                       uniquingKeysWith: { first, _ in first })
         let tombstones = Set(source.deletedExternalIdentifiers)
+        let seriesTombstones = Self.seriesTombstones(in: source.deletedExternalIdentifiers)
         let notifications = NotificationService()
         var categories = (try? context.fetch(FetchDescriptor<Category>())) ?? []
         var changed = false
@@ -127,6 +132,12 @@ final class CalendarImportService {
             if instance.isAllDay { continue }
             // The user deleted this import locally — don't resurrect it (§5.1).
             if tombstones.contains(instance.externalIdentifier) { continue }
+            // "Delete this and all future" on a recurring import: the series
+            // tombstone kills the whole tail, including occurrences the
+            // sliding window hadn't fetched when the user deleted it.
+            if let seriesID = instance.seriesIdentifier,
+               let cutoff = seriesTombstones[seriesID],
+               instance.start >= cutoff { continue }
             fetchedIDs.insert(instance.externalIdentifier)
 
             if let event = byExternalID[instance.externalIdentifier] {
@@ -168,8 +179,10 @@ final class CalendarImportService {
             externalIdentifier: instance.externalIdentifier,
             importSourceID: source.identifier
         )
-        // Occurrences arrive already expanded — store instances, never the rule.
+        // Occurrences arrive already expanded — store instances, never the
+        // rule. seriesID only groups them (badge, series-aware delete).
         event.recurrenceRule = nil
+        event.seriesID = instance.seriesIdentifier
         context.insert(event)
         schedule(event, prefs: prefs, notifications: notifications)
     }
@@ -185,9 +198,13 @@ final class CalendarImportService {
     ) -> Bool {
         let timeChanged = event.startTime != instance.start || event.endTime != instance.end
         let titleChanged = event.title != instance.title
-        guard timeChanged || titleChanged else { return false }
+        // Backfills the recurring tag onto events imported before seriesID
+        // existed — one sync retro-marks them.
+        let seriesChanged = event.seriesID != instance.seriesIdentifier
+        guard timeChanged || titleChanged || seriesChanged else { return false }
 
         event.title = instance.title
+        event.seriesID = instance.seriesIdentifier
         if timeChanged {
             event.startTime = instance.start
             event.endTime = instance.end
@@ -260,6 +277,44 @@ final class CalendarImportService {
               !source.deletedExternalIdentifiers.contains(externalID)
         else { return }
         source.deletedExternalIdentifiers.append(externalID)
+    }
+
+    // MARK: - Series tombstones ("delete this and all future" on an import)
+
+    /// Per-occurrence tombstones can't cover occurrences the sliding sync
+    /// window hasn't fetched yet, so a whole-tail delete records one entry —
+    /// "series:<seriesID>@<ISO cutoff>" — in the same tombstone list, and the
+    /// sync pass skips every occurrence of that series at/after the cutoff.
+    private static let seriesTombstonePrefix = "series:"
+    private static let tombstoneDateFormatter = ISO8601DateFormatter()
+
+    /// Records the tail tombstone, cutoff = the deleted occurrence's start.
+    /// The caller still tombstones + deletes the materialized occurrences.
+    func noteLocalSeriesDeletion(of event: Event, context: ModelContext) {
+        guard event.source == .imported,
+              let seriesID = event.seriesID,
+              let sourceID = event.importSourceID,
+              let source = allSources(context: context).first(where: { $0.identifier == sourceID })
+        else { return }
+        let cutoff = Self.tombstoneDateFormatter.string(from: event.startTime)
+        source.deletedExternalIdentifiers.append(Self.seriesTombstonePrefix + seriesID + "@" + cutoff)
+    }
+
+    /// Parses series tombstones out of the mixed tombstone list. Splits on
+    /// the LAST "@" — series identifiers may themselves contain one. Keeps
+    /// the earliest cutoff when a series was tail-deleted more than once.
+    static func seriesTombstones(in tombstones: [String]) -> [String: Date] {
+        var result: [String: Date] = [:]
+        for entry in tombstones where entry.hasPrefix(seriesTombstonePrefix) {
+            let body = entry.dropFirst(seriesTombstonePrefix.count)
+            guard let at = body.range(of: "@", options: .backwards) else { continue }
+            let seriesID = String(body[..<at.lowerBound])
+            guard !seriesID.isEmpty,
+                  let cutoff = tombstoneDateFormatter.date(from: String(body[at.upperBound...]))
+            else { continue }
+            result[seriesID] = min(result[seriesID] ?? cutoff, cutoff)
+        }
+        return result
     }
 
     // MARK: - Helpers

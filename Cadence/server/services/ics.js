@@ -124,9 +124,13 @@ function expandEvent(ev, { windowStart, windowEnd, zone }) {
 
   if (!ev.rrule) {
     return overlaps(start, end)
-      ? [{ title, start, end, allDay, externalIdentifier: externalId }]
+      ? [{ title, start, end, allDay, externalIdentifier: externalId, seriesIdentifier: null }]
       : [];
   }
+
+  // Every expanded occurrence of this VEVENT shares the unsuffixed base id,
+  // so the client can group them as one recurring series.
+  const seriesIdentifier = externalId;
 
   // Recurring. Expansion is bounded by the window only — a FREQ=DAILY rule
   // with no UNTIL/COUNT is infinite. rrule returns real instants when the
@@ -172,6 +176,7 @@ function expandEvent(ev, { windowStart, windowEnd, zone }) {
       // Keyed by the ORIGINAL occurrence time (the RECURRENCE-ID), so the
       // identifier stays stable across syncs even when the instance moves.
       externalIdentifier: `${externalId}#${toISO(occStart)}`,
+      seriesIdentifier,
     });
   };
 
@@ -195,6 +200,7 @@ function expandEvent(ev, { windowStart, windowEnd, zone }) {
         end: occEnd,
         allDay,
         externalIdentifier: `${externalId}#${toISO(occStart)}`,
+        seriesIdentifier,
       });
     }
   }
@@ -213,7 +219,14 @@ function expandEvent(ev, { windowStart, windowEnd, zone }) {
     if (have.has(dt.toMillis())) continue;
     const e = dt.plus(durationMs);
     if (overlaps(dt, e)) {
-      instances.push({ title, start: dt, end: e, allDay, externalIdentifier: `${externalId}#${toISO(dt)}` });
+      instances.push({
+        title,
+        start: dt,
+        end: e,
+        allDay,
+        externalIdentifier: `${externalId}#${toISO(dt)}`,
+        seriesIdentifier,
+      });
     }
   }
 
@@ -250,6 +263,7 @@ function expandFeed(icsText, { windowStart, windowEnd, zone }) {
       end: toISO(e.end),
       allDay: e.allDay,
       externalIdentifier: e.externalIdentifier,
+      seriesIdentifier: e.seriesIdentifier,
     })),
     feedName: calName,
   };

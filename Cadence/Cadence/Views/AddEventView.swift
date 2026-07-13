@@ -26,6 +26,56 @@ struct AddEventView: View {
     @State private var selectedCategory: Category?
     @State private var showConflictAlert = false
     @State private var conflictNames = ""
+    @State private var repeatChoice: RepeatChoice = .never
+    @State private var repeatInterval = 1
+    @State private var repeatHasEndDate = false
+    @State private var repeatEndDate: Date = Calendar.current.date(byAdding: .month, value: 1, to: .now) ?? .now
+
+    /// "Never" + the four RecurrenceRule frequencies, for the Repeats picker.
+    private enum RepeatChoice: String, CaseIterable, Identifiable {
+        case never, daily, weekly, monthly, yearly
+
+        var id: String { rawValue }
+
+        var label: String {
+            switch self {
+            case .never:   return "Never"
+            case .daily:   return "Daily"
+            case .weekly:  return "Weekly"
+            case .monthly: return "Monthly"
+            case .yearly:  return "Yearly"
+            }
+        }
+
+        var unitName: String {
+            switch self {
+            case .never:   return ""
+            case .daily:   return "day"
+            case .weekly:  return "week"
+            case .monthly: return "month"
+            case .yearly:  return "year"
+            }
+        }
+
+        var frequency: RecurrenceRule.Frequency? {
+            switch self {
+            case .never:   return nil
+            case .daily:   return .daily
+            case .weekly:  return .weekly
+            case .monthly: return .monthly
+            case .yearly:  return .yearly
+            }
+        }
+
+        init(frequency: RecurrenceRule.Frequency) {
+            switch frequency {
+            case .daily:   self = .daily
+            case .weekly:  self = .weekly
+            case .monthly: self = .monthly
+            case .yearly:  self = .yearly
+            }
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -44,6 +94,30 @@ struct AddEventView: View {
                             Label("End time must be after start time.", systemImage: "exclamationmark.triangle.fill")
                                 .font(.caption)
                                 .foregroundColor(.red)
+                        }
+                    }
+
+                    // Imported events mirror their source calendar's rule,
+                    // so recurrence isn't editable from here.
+                    if editingEvent?.source != .imported {
+                        Section("Repeats") {
+                            Picker("Repeats", selection: $repeatChoice) {
+                                ForEach(RepeatChoice.allCases) { choice in
+                                    Text(choice.label).tag(choice)
+                                }
+                            }
+                            .tint(theme.accent)
+                            if repeatChoice != .never {
+                                Stepper(value: $repeatInterval, in: 1...99) {
+                                    Text(repeatIntervalLabel)
+                                }
+                                Toggle("End date", isOn: $repeatHasEndDate)
+                                    .tint(theme.accent)
+                                if repeatHasEndDate {
+                                    DatePicker("Ends", selection: $repeatEndDate, displayedComponents: .date)
+                                        .tint(theme.accent)
+                                }
+                            }
                         }
                     }
 
@@ -96,6 +170,14 @@ struct AddEventView: View {
                     startTime = ev.startTime
                     endTime = ev.endTime
                     selectedCategory = ev.category
+                    if let series = RecurrenceService.shared.series(for: ev, context: context) {
+                        repeatChoice = RepeatChoice(frequency: series.frequency)
+                        repeatInterval = series.interval
+                        if let end = series.endDate {
+                            repeatHasEndDate = true
+                            repeatEndDate = end
+                        }
+                    }
                 } else if let src = reschedulingSource {
                     title = src.title
                     selectedCategory = src.category
@@ -126,6 +208,41 @@ struct AddEventView: View {
         let cal   = Calendar.current
         let comps = cal.dateComponents([.hour, .minute], from: time)
         return cal.date(bySettingHour: comps.hour ?? 0, minute: comps.minute ?? 0, second: 0, of: date) ?? time
+    }
+
+    // MARK: - Recurrence
+
+    private var repeatIntervalLabel: String {
+        let unit = repeatChoice.unitName
+        return repeatInterval == 1 ? "Every \(unit)" : "Every \(repeatInterval) \(unit)s"
+    }
+
+    /// The rule the form currently describes; nil when "Never". The end date
+    /// is pushed to end-of-day so an occurrence ON the chosen day still fits.
+    private var composedRule: RecurrenceRule? {
+        guard let frequency = repeatChoice.frequency else { return nil }
+        let end = repeatHasEndDate
+            ? Calendar.current.date(bySettingHour: 23, minute: 59, second: 59, of: repeatEndDate)
+            : nil
+        return RecurrenceRule(frequency: frequency, interval: repeatInterval, endDate: end)
+    }
+
+    /// Editing only: reconciles the form's rule with the event's series.
+    /// Time/title edits stay occurrence-only; rule changes are series-wide
+    /// (this and future occurrences).
+    private func applyRecurrenceChange(to event: Event) {
+        guard event.source != .imported else { return }
+        let series = RecurrenceService.shared.series(for: event, context: context)
+        switch (series, composedRule) {
+        case (nil, let rule?):
+            RecurrenceService.shared.createSeries(from: event, rule: rule, context: context)
+        case (.some, nil):
+            RecurrenceService.shared.endSeries(from: event, context: context)
+        case (let series?, let rule?) where series.rule != rule:
+            RecurrenceService.shared.updateRule(from: event, to: rule, context: context)
+        default:
+            break
+        }
     }
 
     private func attemptSave() {
@@ -161,6 +278,9 @@ struct AddEventView: View {
             )
             svc.scheduleEventStartAlert(for: event, reminderMinutes: prefs.defaultReminderMinutes)
             svc.scheduleMissedEventAlert(for: event)
+        }
+        if let rule = composedRule {
+            RecurrenceService.shared.createSeries(from: event, rule: rule, context: context)
         }
         // The replacement is saved — now it's safe to drop the missed original.
         if let src = reschedulingSource {
@@ -200,6 +320,8 @@ struct AddEventView: View {
             event.startTime = combinedStart
             event.endTime = combinedEnd
         }
+
+        applyRecurrenceChange(to: event)
 
         try? context.save()
         WidgetSync.refresh()
