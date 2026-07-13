@@ -148,9 +148,18 @@ every-X cadences), and an optional end date.
   the app isn't opened for over a week, series reminders past that pause
   until the next launch.
 - **Edit semantics**: time/title/category edits apply to the single opened
-  occurrence; changing the **rule** applies to this-and-future (the edited
-  occurrence becomes the new anchor/template, later pending occurrences are
-  regenerated). Setting the rule back to Never ends the series in place.
+  occurrence by default; changing the **rule** applies to this-and-future (the
+  edited occurrence becomes the new anchor/template, later pending occurrences
+  are regenerated). Setting the rule back to Never ends the series in place.
+- **Bulk occurrence edit** (implemented): the edit sheet's **Apply to** section
+  offers a "Change all occurrences" toggle for a native series; ticking it
+  reveals a scope picker — *This & future* (mirrors rule-change semantics,
+  history untouched) or *All (incl. past)*. `RecurrenceService.applyOccurrenceEdit`
+  copies the edited title/category onto the chosen occurrences and stamps the
+  edited time-of-day + duration onto each (every occurrence keeps its own day),
+  updates the `EventSeries` template, and rebuilds near-window notifications.
+  Occurrence statuses are never changed, so `All` never rewrites completed
+  history into pending.
 - **Delete semantics**: swipe-deleting a series occurrence in Schedule asks
   "Delete This Event" vs "Delete This and Future Events"; the latter caps
   the series' `endDate` (native) or writes a series tombstone (imported).
@@ -163,6 +172,11 @@ every-X cadences), and an optional end date.
 ### 3. Categories
 - User-defined categories applied to all events
 - Used for performance tracking and filtering
+- **Bulk categorize by title** (implemented): when editing a *one-off* event
+  that shares its title with other events, the edit sheet's **Apply to** section
+  offers "Set category on all N events named X". `EventBulkService.setCategory`
+  reassigns the category on every case-insensitive title match in one save
+  (pure OS-blind service; `siblingCount` drives whether the toggle appears).
 
 ### 4. Performance Reports
 - **Weekly** and **Monthly** views

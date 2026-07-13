@@ -31,6 +31,18 @@ struct AddEventView: View {
     @State private var repeatHasEndDate = false
     @State private var repeatEndDate: Date = Calendar.current.date(byAdding: .month, value: 1, to: .now) ?? .now
 
+    // Bulk-edit scope (edit mode only). Populated in onAppear.
+    /// True when editing an occurrence of a *native* recurring series — enables
+    /// the "change all occurrences" scope toggle.
+    @State private var isNativeSeries = false
+    @State private var applyToAllOccurrences = false
+    @State private var seriesEditScope: SeriesEditScope = .thisAndFuture
+    /// Non-recurring events that share this event's title, so we can offer a
+    /// "set category on all named X" toggle. Title captured at open time.
+    @State private var siblingCount = 0
+    @State private var originalTitle = ""
+    @State private var applyCategoryToSiblings = false
+
     /// "Never" + the four RecurrenceRule frequencies, for the Repeats picker.
     private enum RepeatChoice: String, CaseIterable, Identifiable {
         case never, daily, weekly, monthly, yearly
@@ -141,6 +153,10 @@ struct AddEventView: View {
                             }
                         }
                     }
+
+                    if editingEvent != nil {
+                        applyScopeSection
+                    }
                 }
                 .scrollContentBackground(.hidden)
             }
@@ -166,17 +182,22 @@ struct AddEventView: View {
             .onAppear {
                 if let ev = editingEvent {
                     title = ev.title
+                    originalTitle = ev.title
                     selectedDate = ev.startTime
                     startTime = ev.startTime
                     endTime = ev.endTime
                     selectedCategory = ev.category
                     if let series = RecurrenceService.shared.series(for: ev, context: context) {
+                        isNativeSeries = true
                         repeatChoice = RepeatChoice(frequency: series.frequency)
                         repeatInterval = series.interval
                         if let end = series.endDate {
                             repeatHasEndDate = true
                             repeatEndDate = end
                         }
+                    } else if ev.seriesID == nil {
+                        // One-off event: offer bulk category only if it has same-title siblings.
+                        siblingCount = EventBulkService.siblingCount(of: ev, context: context)
                     }
                 } else if let src = reschedulingSource {
                     title = src.title
@@ -187,6 +208,36 @@ struct AddEventView: View {
                     if !prefillTitle.isEmpty { title = prefillTitle }
                     if let initialDate { selectedDate = initialDate }
                 }
+            }
+        }
+    }
+
+    // MARK: - Bulk-edit scope UI
+
+    /// Edit-mode section letting the user push this edit beyond the single
+    /// occurrence. For a native series: a "change all occurrences" toggle that
+    /// reveals a scope picker only once ticked (keeps the sheet uncluttered).
+    /// For a one-off event with same-title siblings: a "set category on all
+    /// named X" toggle.
+    @ViewBuilder
+    private var applyScopeSection: some View {
+        if isNativeSeries {
+            Section("Apply to") {
+                Toggle("Change all occurrences", isOn: $applyToAllOccurrences)
+                    .tint(theme.accent)
+                if applyToAllOccurrences {
+                    Picker("Occurrences", selection: $seriesEditScope) {
+                        Text("This & future").tag(SeriesEditScope.thisAndFuture)
+                        Text("All (incl. past)").tag(SeriesEditScope.all)
+                    }
+                    .tint(theme.accent)
+                }
+            }
+        } else if siblingCount > 0 {
+            Section("Apply to") {
+                Toggle("Set category on all \(siblingCount + 1) events named “\(originalTitle)”",
+                       isOn: $applyCategoryToSiblings)
+                    .tint(theme.accent)
             }
         }
     }
@@ -322,6 +373,22 @@ struct AddEventView: View {
         }
 
         applyRecurrenceChange(to: event)
+
+        // Propagate the edit beyond this occurrence when the user opted in.
+        if applyToAllOccurrences, isNativeSeries {
+            RecurrenceService.shared.applyOccurrenceEdit(
+                from: event,
+                scope: seriesEditScope,
+                title: event.title,
+                category: event.category,
+                startTimeOfDay: Calendar.current.dateComponents([.hour, .minute], from: startTime),
+                duration: combinedEnd.timeIntervalSince(combinedStart),
+                context: context
+            )
+        } else if applyCategoryToSiblings {
+            // Match on the title the siblings were grouped by, not a rename.
+            EventBulkService.setCategory(event.category, forEventsTitled: originalTitle, context: context)
+        }
 
         try? context.save()
         WidgetSync.refresh()

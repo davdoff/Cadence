@@ -1,6 +1,15 @@
 import Foundation
 import SwiftData
 
+/// Which occurrences a bulk occurrence-edit touches. `.thisAndFuture` mirrors
+/// the rule-change semantics (this occurrence + later pending ones, history
+/// untouched); `.all` rewrites every occurrence in the series, past included.
+/// Surfaced in the edit sheet only after the user opts into "change all".
+enum SeriesEditScope: Hashable {
+    case thisAndFuture
+    case all
+}
+
 /// Native recurring events: owns `EventSeries` rows and materializes their
 /// occurrences as real `Event` rows within a rolling horizon — the same
 /// store-instances-not-rules shape the calendar import uses, so the
@@ -109,6 +118,65 @@ final class RecurrenceService {
         series.duration = occurrence.duration
         series.materializedUntil = occurrence.startTime
         materialize(series, context: context)
+        scheduleNearNotifications(context: context)
+    }
+
+    /// Propagates an occurrence-level edit (title, category, time-of-day,
+    /// duration) from `occurrence` across its native series. Each affected
+    /// occurrence keeps its own calendar day but adopts the edited time-of-day
+    /// and duration; title and category are copied as-is. The series template
+    /// is updated so future materialization matches. Notifications for affected
+    /// occurrences are rebuilt via the near-window scheduler. Occurrence
+    /// statuses are left untouched, so `.all` never rewrites completed history
+    /// into pending. No-op for imported series (no EventSeries row). Caller
+    /// saves the context.
+    func applyOccurrenceEdit(
+        from occurrence: Event,
+        scope: SeriesEditScope,
+        title: String,
+        category: Category?,
+        startTimeOfDay: DateComponents,
+        duration: TimeInterval,
+        context: ModelContext
+    ) {
+        guard let series = series(for: occurrence, context: context) else { return }
+        let calendar = Calendar.current
+        let notifications = NotificationService()
+        let hour = startTimeOfDay.hour ?? 0
+        let minute = startTimeOfDay.minute ?? 0
+
+        let affected = events(seriesID: series.id.uuidString, context: context).filter { event in
+            switch scope {
+            case .all:           return true
+            case .thisAndFuture: return event.id == occurrence.id || event.startTime > occurrence.startTime
+            }
+        }
+
+        for event in affected {
+            event.title = title
+            event.category = category
+            guard let newStart = calendar.date(bySettingHour: hour, minute: minute, second: 0, of: event.startTime)
+            else { continue }
+            if event.startTime != newStart || event.duration != duration {
+                event.startTime = newStart
+                event.endTime = newStart.addingTimeInterval(duration)
+                // Drop scheduled notifications; the near-window pass re-adds the
+                // ones that still qualify (respecting the 64-notification cap).
+                if event.notificationIdentifier != nil {
+                    notifications.cancelEventNotifications(for: event)
+                    event.notificationIdentifier = nil
+                }
+            }
+        }
+
+        // Update the template so future materialization matches the edit.
+        series.title = title
+        series.category = category
+        if let anchorStart = calendar.date(bySettingHour: hour, minute: minute, second: 0, of: series.anchorStart) {
+            series.anchorStart = anchorStart
+        }
+        series.duration = duration
+
         scheduleNearNotifications(context: context)
     }
 

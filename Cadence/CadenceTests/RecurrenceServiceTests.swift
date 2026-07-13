@@ -210,6 +210,83 @@ final class RecurrenceServiceTests: XCTestCase {
         XCTAssertEqual(seriesEvents(anchor.seriesID).count, 1)
     }
 
+    // MARK: - Bulk occurrence edit (apply to all / this & future)
+
+    private func timeOfDay(_ hour: Int, _ minute: Int) -> DateComponents {
+        DateComponents(hour: hour, minute: minute)
+    }
+
+    private func hm(_ date: Date) -> (Int, Int) {
+        let c = Calendar.current.dateComponents([.hour, .minute], from: date)
+        return (c.hour ?? -1, c.minute ?? -1)
+    }
+
+    func testApplyAllRewritesEveryOccurrenceCategoryTimeAndDuration() {
+        let anchor = makeDailySeries()
+        let fitness = Category(name: "Fitness", colorHex: "#FF0000")
+        context.insert(fitness)
+
+        RecurrenceService.shared.applyOccurrenceEdit(
+            from: anchor, scope: .all,
+            title: "Workout", category: fitness,
+            startTimeOfDay: timeOfDay(6, 30), duration: 900, context: context
+        )
+
+        let events = seriesEvents(anchor.seriesID)
+        XCTAssertFalse(events.isEmpty)
+        for e in events {
+            XCTAssertEqual(e.title, "Workout")
+            XCTAssertEqual(e.category?.id, fitness.id)
+            XCTAssertEqual(e.duration, 900)
+            XCTAssertEqual(hm(e.startTime).0, 6)
+            XCTAssertEqual(hm(e.startTime).1, 30)
+        }
+    }
+
+    func testApplyThisAndFutureLeavesPastOccurrencesUntouched() {
+        let anchor = makeDailySeries()
+        let events = seriesEvents(anchor.seriesID)
+        let pivot = events[10]
+        let (anchorHour, anchorMinute) = hm(anchor.startTime)
+        let fitness = Category(name: "Fitness", colorHex: "#00FF00")
+        context.insert(fitness)
+
+        RecurrenceService.shared.applyOccurrenceEdit(
+            from: pivot, scope: .thisAndFuture,
+            title: "Workout", category: fitness,
+            startTimeOfDay: timeOfDay(6, 30), duration: 900, context: context
+        )
+
+        let after = seriesEvents(anchor.seriesID)
+        for e in after where e.startTime < pivot.startTime {
+            XCTAssertNil(e.category)          // history keeps its (nil) category
+            XCTAssertEqual(hm(e.startTime).0, anchorHour)
+            XCTAssertEqual(hm(e.startTime).1, anchorMinute)
+        }
+        for e in after where e.startTime >= pivot.startTime {
+            XCTAssertEqual(e.category?.id, fitness.id)
+            XCTAssertEqual(hm(e.startTime).0, 6)
+        }
+    }
+
+    func testApplyEditUpdatesSeriesTemplate() {
+        let anchor = makeDailySeries()
+        let fitness = Category(name: "Fitness", colorHex: "#0000FF")
+        context.insert(fitness)
+
+        RecurrenceService.shared.applyOccurrenceEdit(
+            from: anchor, scope: .all,
+            title: "Workout", category: fitness,
+            startTimeOfDay: timeOfDay(6, 30), duration: 900, context: context
+        )
+
+        let series = RecurrenceService.shared.series(for: anchor, context: context)
+        XCTAssertEqual(series?.title, "Workout")
+        XCTAssertEqual(series?.category?.id, fitness.id)
+        XCTAssertEqual(series?.duration, 900)
+        XCTAssertEqual(series.map { hm($0.anchorStart).0 }, 6)
+    }
+
     // MARK: - Series tombstone parsing (imported "delete this and future")
 
     func testSeriesTombstoneRoundTrip() {
