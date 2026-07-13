@@ -36,10 +36,10 @@ struct AddEventView: View {
                         TextField("Event title", text: $title)
                         DatePicker("Date", selection: $selectedDate, displayedComponents: .date)
                             .tint(theme.accent)
-                        DatePicker("Starts", selection: $startTime, displayedComponents: .hourAndMinute)
-                            .tint(theme.accent)
-                        DatePicker("Ends", selection: $endTime, displayedComponents: .hourAndMinute)
-                            .tint(theme.accent)
+                    }
+
+                    Section("Time") {
+                        ClockTimePicker(start: $startTime, end: $endTime)
                         if !isTimeRangeValid {
                             Label("End time must be after start time.", systemImage: "exclamationmark.triangle.fill")
                                 .font(.caption)

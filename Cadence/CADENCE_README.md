@@ -94,6 +94,23 @@ Each event supports:
   `visibleMonth` stay in sync with the selected day (and the "Today" button)
 - Add Event validates the time range: Save is disabled and an inline
   warning shows while end ≤ start (`DateInterval` would trap otherwise)
+- **Clock-dial time picker** (`Views/ClockTimePicker.swift`): the Add/Edit
+  Event form sets start/end on a single radial 12-hour clock face instead of
+  two stock wheels. One dial, two hands (start = accent, end = muted) with the
+  duration drawn as an arc between them; a full 24 h takes **two spins** of a
+  hand (lap 0 = AM, lap 1 = PM), so an explicit AM/PM segmented pill both
+  shows the active hand's lap and flips it ±12 h. Dragging snaps to 15-min
+  detents with haptic ticks; drag-start grabs whichever hand is nearer the
+  touch, and Start/End chips under the dial select a hand explicitly. Dragging
+  start pushes end along to preserve a minimum duration (default 15 min), so
+  the dial can never produce end ≤ start. Exact minutes — and the
+  VoiceOver/motor-accessibility path — use the classic wheel `DatePicker`s,
+  one tap away (the "123" toggle or tapping the big readout); the dial also
+  exposes an `accessibilityAdjustableAction` (±15 min). All angle↔time math
+  (720° = 24 h, atan2 seam unwrapping, detent snapping) lives in the pure
+  `Services/DialGeometry.swift` enum, unit-tested in `DialGeometryTests`.
+  The component is presentation-only (binds two `Date`s, edits time-of-day in
+  place) and reusable for other time-pair inputs later.
 
 ### 3. Categories
 - User-defined categories applied to all events
