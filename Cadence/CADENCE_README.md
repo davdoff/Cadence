@@ -106,17 +106,19 @@ Each event supports:
 - **Clock-dial time picker** (`Views/ClockTimePicker.swift`): the Add/Edit
   Event form sets start/end on a single radial 12-hour clock face instead of
   two stock wheels. One dial, two hands (start = accent, end = muted) with the
-  duration drawn as an arc between them; a full 24 h takes **two spins** of a
-  hand (lap 0 = AM, lap 1 = PM), so an explicit AM/PM segmented pill both
-  shows the active hand's lap and flips it ±12 h. Dragging snaps to 15-min
+  duration drawn as an arc between them; the face is a **single revolution**
+  (one spin = 12 h), and an explicit AM/PM segmented pill chooses morning vs
+  afternoon by flipping the active hand ±12 h. Dragging past 12 o'clock wraps
+  within the same half and never auto-flips AM/PM. Dragging snaps to 15-min
   detents with haptic ticks; drag-start grabs whichever hand is nearer the
   touch, and Start/End chips under the dial select a hand explicitly. Dragging
-  start pushes end along to preserve a minimum duration (default 15 min), so
-  the dial can never produce end ≤ start. Exact minutes — and the
+  **start slides end along**, preserving the gap captured when the hand was
+  grabbed (at least a 15-min minimum), so the dial can never produce end ≤
+  start. Exact minutes — and the
   VoiceOver/motor-accessibility path — use the classic wheel `DatePicker`s,
   one tap away (the "123" toggle or tapping the big readout); the dial also
   exposes an `accessibilityAdjustableAction` (±15 min). All angle↔time math
-  (720° = 24 h, atan2 seam unwrapping, detent snapping) lives in the pure
+  (360° = 12 h, atan2 seam unwrapping, detent snapping) lives in the pure
   `Services/DialGeometry.swift` enum, unit-tested in `DialGeometryTests`.
   The component is presentation-only (binds two `Date`s, edits time-of-day in
   place) and reusable for other time-pair inputs later.
@@ -172,11 +174,15 @@ every-X cadences), and an optional end date.
 ### 3. Categories
 - User-defined categories applied to all events
 - Used for performance tracking and filtering
-- **Bulk categorize by title** (implemented): when editing a *one-off* event
-  that shares its title with other events, the edit sheet's **Apply to** section
-  offers "Set category on all N events named X". `EventBulkService.setCategory`
-  reassigns the category on every case-insensitive title match in one save
-  (pure OS-blind service; `siblingCount` drives whether the toggle appears).
+- **Bulk categorize by title** (implemented): when editing any event that is
+  *not* a Cadence-owned series — a one-off, or an **imported recurring** event
+  (which has a `seriesID` but no `EventSeries`, since its rule lives in the
+  source calendar) — and it shares its title with other events, the edit
+  sheet's **Apply to** section offers "Set category on all N events named X".
+  `EventBulkService.setCategory` reassigns the category on every
+  case-insensitive title match in one save (pure OS-blind service;
+  `siblingCount` drives whether the toggle appears). Native Cadence series get
+  the richer occurrence-scope path instead (see §2.1).
 
 ### 4. Performance Reports
 - **Weekly** and **Monthly** views

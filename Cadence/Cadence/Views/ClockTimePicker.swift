@@ -2,8 +2,13 @@ import SwiftUI
 
 /// Radial time picker for a start/end pair: one 12-hour clock face, two hands
 /// (start = accent, end = muted), and the duration drawn as an arc between
-/// them. The full 24 h takes **two spins** of a hand (lap 0 = AM, lap 1 = PM),
-/// with an explicit AM/PM pill because the face alone can't disambiguate laps.
+/// them. The face is a **single revolution**, and an explicit AM/PM pill
+/// chooses morning vs afternoon for the active hand, because the face alone
+/// can't disambiguate them. Dragging start past 12 o'clock wraps within its
+/// current half (only the pill changes it); dragging end past 12 o'clock
+/// *does* carry it into the next half — end trails start, so letting it wind
+/// naturally past noon (or past midnight) is how a duration is meant to cross
+/// into PM/the next half without a separate toggle.
 ///
 /// Dragging snaps to 15-minute detents with haptic ticks; exact minutes — and
 /// VoiceOver / motor-accessibility users — use the classic wheel pickers, kept
@@ -27,9 +32,15 @@ struct ClockTimePicker: View {
 
     @State private var activeHand: Hand = .start
     @State private var inputMode: InputMode = .dial
-    /// Accumulated rotation (0°–720°) of the hand being dragged; nil = idle.
+    /// Continuous face angle of the hand being dragged; nil = idle. While a
+    /// drag is live this single angle drives *all* rendering — both hands and
+    /// the duration arc — so they glide 1:1 with the finger; the 15-minute
+    /// snapping applies only to the value layer (readout, chips, haptics).
     @State private var accumulatedAngle: Double?
     @State private var lastFingerAngle = 0.0
+    /// Gap (end − start, minutes) captured when the start hand is grabbed, so
+    /// dragging start slides end along without shrinking the duration.
+    @State private var dragGap: Int?
     /// One-time "you can spin this" nudge on first ever appearance.
     @AppStorage("clockDialHintShown") private var hintShown = false
     @State private var hintNudge = 0.0
@@ -107,12 +118,12 @@ struct ClockTimePicker: View {
                 durationArc
                     .padding(6)
                 lapGlyph(radius: radius)
-                handView(minutes: endMinutes,
+                handView(angle: endDisplayMinutes * 0.5,
                          length: radius * 0.58,
                          color: theme.text2,
                          width: 4,
                          isActive: activeHand == .end)
-                handView(minutes: startMinutes,
+                handView(angle: startDisplayMinutes * 0.5,
                          length: radius * 0.72,
                          color: theme.accent,
                          width: 5,
@@ -132,7 +143,9 @@ struct ClockTimePicker: View {
         .accessibilityHint("Adjusts in 15 minute steps. For exact minutes use the wheel pickers button.")
         .accessibilityAdjustableAction { direction in
             let step = direction == .increment ? DialGeometry.snapStep : -DialGeometry.snapStep
-            setActive(DialGeometry.snapped(activeMinutes + step))
+            withAnimation(.snappy) {
+                setActive(DialGeometry.snapped(activeMinutes + step))
+            }
         }
     }
 
@@ -165,19 +178,44 @@ struct ClockTimePicker: View {
         }
     }
 
+    // MARK: - Display minutes (continuous while dragging, snapped at rest)
+    //
+    // The value layer snaps to 15-min detents, but rendering from snapped
+    // values makes hands jump in 7.5° steps mid-drag. So hands and arc render
+    // from these instead: while a drag is live they follow the continuous
+    // finger angle — the non-dragged end hand drawn rigidly `dragGap` ahead of
+    // start — and at rest they settle to the snapped values (a jump of at most
+    // half a detent, unanimated, so it can never spin the wrong way round the
+    // 12 o'clock seam).
+
+    private var startDisplayMinutes: Double {
+        if let a = accumulatedAngle, activeHand == .start {
+            return Double(DialGeometry.halfBase(startMinutes)) + DialGeometry.normalizedAngle(a) * 2
+        }
+        return Double(startMinutes)
+    }
+
+    private var endDisplayMinutes: Double {
+        if let a = accumulatedAngle {
+            if activeHand == .start {
+                return startDisplayMinutes + Double(dragGap ?? (endMinutes - startMinutes))
+            }
+            return Double(DialGeometry.halfBase(endMinutes)) + DialGeometry.normalizedAngle(a) * 2
+        }
+        return Double(endMinutes)
+    }
+
     /// Accent arc swept clockwise from the start hand to the end hand — this
     /// is what makes the duration *visible*. A duration of 12 h+ fills the
     /// whole ring.
     private var durationArc: some View {
-        let sweep = max(0, min(Double(endMinutes - startMinutes) * 0.5, 360))
+        let sweep = max(0, min((endDisplayMinutes - startDisplayMinutes) * 0.5, 360))
         return Circle()
             .trim(from: 0, to: sweep / 360)
             .stroke(theme.accent.opacity(0.35),
                     style: StrokeStyle(lineWidth: 9, lineCap: .round))
             // trim(0…) starts at 3 o'clock; rotate so it starts at the hand.
-            .rotationEffect(.degrees(DialGeometry.faceAngle(forMinutes: startMinutes) - 90))
-            .animation(.snappy, value: startMinutes)
-            .animation(.snappy, value: endMinutes)
+            .rotationEffect(.degrees(startDisplayMinutes * 0.5 - 90))
     }
 
     /// Faint sun/moon showing which lap the active hand is on, mid-drag.
@@ -189,57 +227,71 @@ struct ClockTimePicker: View {
             .animation(.snappy, value: activeMinutes < 720)
     }
 
-    private func handView(minutes: Int, length: CGFloat, color: Color,
+    /// No implicit animation on the rotation: mid-drag the angle already
+    /// tracks the finger 1:1 (a spring would only lag behind it), and paths
+    /// that *should* animate — the accessibility ±15 min action, the hint
+    /// nudge — wrap their state change in an explicit `withAnimation`.
+    private func handView(angle: Double, length: CGFloat, color: Color,
                           width: CGFloat, isActive: Bool) -> some View {
         Capsule()
             .fill(color)
             .frame(width: width, height: length)
             .offset(y: -length / 2)
             .shadow(color: isActive ? color.opacity(0.45) : .clear, radius: 4)
-            // Rotate by the *accumulated* angle (0°–720°), not the face angle:
-            // visually identical (rotation is periodic) but animates smoothly
-            // across the 12-o'clock wrap instead of spinning the long way back.
-            .rotationEffect(.degrees(DialGeometry.totalAngle(fromMinutes: minutes)
-                                     + (isActive ? hintNudge : 0)))
-            .animation(.snappy, value: minutes)
+            .rotationEffect(.degrees(angle + (isActive ? hintNudge : 0)))
             .opacity(isActive ? 1 : 0.75)
     }
 
-    // MARK: - Drag (accumulated rotation + winding)
+    // MARK: - Drag (continuous face angle; start wraps within its half, end can cross into the next)
 
     private func dialGesture(center: CGPoint) -> some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
                 let finger = DialGeometry.fingerAngle(of: value.location, around: center)
                 guard let current = accumulatedAngle else {
-                    // Drag start: grab whichever hand is nearer the touch,
-                    // then seed the accumulated rotation from its time.
+                    // Drag start: grab whichever hand is nearer the touch, seed
+                    // the drag angle from its face position, and (if start was
+                    // grabbed) remember the gap so end slides along with it.
                     grabNearestHand(toFaceAngle: finger)
-                    accumulatedAngle = DialGeometry.totalAngle(fromMinutes: activeMinutes)
+                    accumulatedAngle = DialGeometry.continuousAngle(forMinutes: activeMinutes)
+                    dragGap = activeHand == .start ? endMinutes - startMinutes : nil
                     lastFingerAngle = finger
                     return
                 }
-                let delta = DialGeometry.unwrappedDelta(from: lastFingerAngle, to: finger)
+                // Keep the angle continuous (no window clamp) so the hand can
+                // wind freely past a single revolution.
+                let angle = current + DialGeometry.unwrappedDelta(from: lastFingerAngle, to: finger)
                 lastFingerAngle = finger
-                // Clamp to this hand's legal window so there's no "dead zone"
-                // where the finger keeps winding past the limit.
-                let angle = min(max(current + delta, minAngleForActiveHand), maxAngleForActiveHand)
                 accumulatedAngle = angle
-                setActive(DialGeometry.snapped(DialGeometry.minutes(fromTotalAngle: angle)))
+                let requested: Int
+                if activeHand == .end {
+                    // End is the one hand allowed to cross AM/PM by dragging
+                    // past 12: snap the raw continuous angle directly so the
+                    // half and the within-half position come from the same
+                    // rounding step (see snappedContinuousMinutes — rounding
+                    // them separately disagreed right at the 12 o'clock seam).
+                    requested = DialGeometry.snappedContinuousMinutes(fromContinuousAngle: angle)
+                } else {
+                    // Start only ever wraps within its current half; only the
+                    // AM/PM pill changes which half start is in.
+                    let raw = DialGeometry.positionMinutes(fromFaceAngle: angle)
+                    let position = DialGeometry.snapped(raw) % DialGeometry.halfDayMinutes
+                    requested = DialGeometry.halfBase(activeMinutes) + position
+                }
+                let applied = setActive(requested)
+                if applied != requested {
+                    // A real wall fired (end pinned at start + minimum, or the
+                    // day-end cap): re-anchor the drag angle so the rendered
+                    // hand pins at the limit instead of running away with the
+                    // finger, using `applied`'s own half so a later reversal
+                    // doesn't lose track of a crossing already made.
+                    accumulatedAngle = DialGeometry.continuousAngle(forMinutes: applied)
+                }
             }
-            .onEnded { _ in accumulatedAngle = nil }
-    }
-
-    private var minAngleForActiveHand: Double {
-        activeHand == .end
-            ? DialGeometry.totalAngle(fromMinutes: startMinutes + minimumDuration)
-            : 0
-    }
-
-    private var maxAngleForActiveHand: Double {
-        activeHand == .start
-            ? DialGeometry.totalAngle(fromMinutes: DialGeometry.maxSnappedMinutes - minimumDuration)
-            : DialGeometry.totalDegrees
+            .onEnded { _ in
+                accumulatedAngle = nil
+                dragGap = nil
+            }
     }
 
     private func grabNearestHand(toFaceAngle finger: Double) {
@@ -248,7 +300,7 @@ struct ClockTimePicker: View {
         withAnimation(.snappy) { activeHand = toStart <= toEnd ? .start : .end }
     }
 
-    // MARK: - AM/PM pill (lap indicator *and* shortcut: flips ±12 h)
+    // MARK: - AM/PM pill (chooses the half: flips the active hand ±12 h)
 
     private var amPmPill: some View {
         Picker("AM or PM", selection: amPmBinding) {
@@ -321,22 +373,35 @@ struct ClockTimePicker: View {
     private var endMinutes: Int { Self.minutesOfDay(end) }
     private var activeMinutes: Int { activeHand == .start ? startMinutes : endMinutes }
 
-    private func setActive(_ minutes: Int) {
+    /// Applies the requested minutes to the active hand and returns what was
+    /// actually applied — a caller comparing the two can tell a clamp fired.
+    @discardableResult
+    private func setActive(_ minutes: Int) -> Int {
         activeHand == .start ? setStart(minutes) : setEnd(minutes)
     }
 
-    /// Moving start drags end along when needed, preserving `minimumDuration`.
-    private func setStart(_ minutes: Int) {
-        let m = min(max(minutes, 0), DialGeometry.maxSnappedMinutes - minimumDuration)
-        start = Self.setting(minutes: m, on: start)
-        if endMinutes < m + minimumDuration {
-            end = Self.setting(minutes: m + minimumDuration, on: end)
+    /// Moving start slides end along, preserving the current gap (the duration
+    /// captured when the hand was grabbed, or at least `minimumDuration`). If
+    /// end would run off the end of the day, start stops with it.
+    @discardableResult
+    private func setStart(_ minutes: Int) -> Int {
+        let gap = max(dragGap ?? (endMinutes - startMinutes), minimumDuration)
+        var m = min(max(minutes, 0), DialGeometry.maxSnappedMinutes)
+        var e = m + gap
+        if e > DialGeometry.maxSnappedMinutes {
+            e = DialGeometry.maxSnappedMinutes
+            m = e - gap
         }
+        start = Self.setting(minutes: m, on: start)
+        end = Self.setting(minutes: e, on: end)
+        return m
     }
 
-    private func setEnd(_ minutes: Int) {
+    @discardableResult
+    private func setEnd(_ minutes: Int) -> Int {
         let m = min(max(minutes, startMinutes + minimumDuration), DialGeometry.maxSnappedMinutes)
         end = Self.setting(minutes: m, on: end)
+        return m
     }
 
     private static func minutesOfDay(_ date: Date) -> Int {

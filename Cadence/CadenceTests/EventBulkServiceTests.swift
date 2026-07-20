@@ -89,4 +89,26 @@ final class EventBulkServiceTests: XCTestCase {
 
         XCTAssertEqual(EventBulkService.siblingCount(of: target, context: context), 0)
     }
+
+    /// Imported recurring events carry a `seriesID` (their rule lives in the
+    /// source calendar) but no Cadence `EventSeries`. Bulk categorize groups by
+    /// title alone, so those occurrences must still be caught and counted.
+    func testImportedRecurringOccurrencesAreCategorizedByTitle() {
+        let fitness = Category(name: "Fitness", colorHex: "#FF0000")
+        context.insert(fitness)
+        let importedID = UUID().uuidString
+        for _ in 0..<3 {
+            let e = makeEvent("Gym")
+            e.seriesID = importedID          // imported recurring, no EventSeries row
+        }
+        makeEvent("Gym")                     // an unrelated one-off, same title
+
+        let changed = EventBulkService.setCategory(fitness, forEventsTitled: "Gym", context: context)
+
+        XCTAssertEqual(changed, 4)
+        let all = (try? context.fetch(FetchDescriptor<Event>())) ?? []
+        for e in all where e.title.lowercased() == "gym" {
+            XCTAssertEqual(e.category?.id, fitness.id)
+        }
+    }
 }

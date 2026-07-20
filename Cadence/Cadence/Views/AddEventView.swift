@@ -195,8 +195,10 @@ struct AddEventView: View {
                             repeatHasEndDate = true
                             repeatEndDate = end
                         }
-                    } else if ev.seriesID == nil {
-                        // One-off event: offer bulk category only if it has same-title siblings.
+                    } else {
+                        // Not a Cadence-owned series (a one-off, or an imported
+                        // recurring event whose rule lives in the source calendar).
+                        // Offer bulk category if it has same-title siblings.
                         siblingCount = EventBulkService.siblingCount(of: ev, context: context)
                     }
                 } else if let src = reschedulingSource {
@@ -217,8 +219,8 @@ struct AddEventView: View {
     /// Edit-mode section letting the user push this edit beyond the single
     /// occurrence. For a native series: a "change all occurrences" toggle that
     /// reveals a scope picker only once ticked (keeps the sheet uncluttered).
-    /// For a one-off event with same-title siblings: a "set category on all
-    /// named X" toggle.
+    /// For anything else with same-title siblings (a one-off, or an imported
+    /// recurring event): a "set category on all named X" toggle.
     @ViewBuilder
     private var applyScopeSection: some View {
         if isNativeSeries {
