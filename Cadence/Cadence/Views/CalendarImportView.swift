@@ -16,9 +16,24 @@ struct CalendarImportView: View {
     @State private var feedURLText = ""
     @State private var isAddingFeed = false
     @State private var importError: String?
+    /// Account groups the user has collapsed in the connected-calendars list.
+    /// Absent = expanded (the default), so new groups start open.
+    @State private var collapsedGroups: Set<String> = []
 
     private var deviceSources: [CalendarImportSource] {
         sources.filter { $0.kind == .deviceCalendar }
+    }
+
+    /// Fallback group name for device sources with no stored account (feeds
+    /// never appear here; older sources connected before `accountName` existed).
+    private static let ungroupedName = "Other calendars"
+
+    /// Connected device calendars grouped by account, groups sorted by name.
+    /// Order within a group follows the `sources` query (by displayName).
+    private var deviceSourceGroups: [(account: String, sources: [CalendarImportSource])] {
+        Dictionary(grouping: deviceSources) { $0.accountName ?? Self.ungroupedName }
+            .map { (account: $0.key, sources: $0.value) }
+            .sorted { $0.account.localizedCaseInsensitiveCompare($1.account) == .orderedAscending }
     }
 
     private var feedSources: [CalendarImportSource] {
@@ -85,8 +100,14 @@ struct CalendarImportView: View {
     private var connectedSection: some View {
         if !deviceSources.isEmpty {
             Section {
-                ForEach(deviceSources) { source in
-                    sourceRow(source)
+                ForEach(deviceSourceGroups, id: \.account) { group in
+                    DisclosureGroup(isExpanded: expansionBinding(for: group.account)) {
+                        ForEach(group.sources) { source in
+                            sourceRow(source)
+                        }
+                    } label: {
+                        groupHeader(account: group.account, groupSources: group.sources)
+                    }
                 }
             } header: {
                 Text("Connected calendars")
@@ -95,6 +116,40 @@ struct CalendarImportView: View {
                     .font(.caption)
             }
         }
+    }
+
+    /// Collapsed/expanded binding for one account group (default expanded).
+    private func expansionBinding(for account: String) -> Binding<Bool> {
+        Binding(
+            get: { !collapsedGroups.contains(account) },
+            set: { expanded in
+                if expanded { collapsedGroups.remove(account) }
+                else { collapsedGroups.insert(account) }
+            }
+        )
+    }
+
+    /// Account row with a master toggle: on only when every calendar in the
+    /// group is enabled; toggling it enables/disables all of them at once
+    /// (enabling triggers a sync, mirroring the per-calendar toggle).
+    private func groupHeader(account: String, groupSources: [CalendarImportSource]) -> some View {
+        let enabledCount = groupSources.filter(\.isEnabled).count
+        return Toggle(isOn: Binding(
+            get: { enabledCount == groupSources.count },
+            set: { enabled in
+                for source in groupSources { source.isEnabled = enabled }
+                try? context.save()
+                if enabled { sync() }
+            }
+        )) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(account)
+                Text("\(enabledCount) of \(groupSources.count) synced")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .tint(theme.accent)
     }
 
     // MARK: - Subscription feeds (§4 — parsed by the backend, never Apple Calendar)
@@ -138,6 +193,17 @@ struct CalendarImportView: View {
                     }
                 }
                 .disabled(isSyncing)
+
+                Button {
+                    CalendarImportService.shared.pauseAllSyncing(context: context)
+                } label: {
+                    Label("Pause all syncing", systemImage: "pause.circle")
+                        .foregroundColor(theme.accent)
+                }
+                .disabled(isSyncing)
+            } footer: {
+                Text("Pausing keeps every imported event where it is and stops auto-sync from changing them. Turn any calendar back on to resume.")
+                    .font(.caption)
             }
         }
     }
@@ -256,6 +322,7 @@ struct CalendarImportView: View {
             displayName: account.isEmpty ? calendar.title : "\(calendar.title) (\(account))",
             identifier: calendar.calendarIdentifier
         )
+        source.accountName = account.isEmpty ? nil : account
         context.insert(source)
         try? context.save()
         sync()

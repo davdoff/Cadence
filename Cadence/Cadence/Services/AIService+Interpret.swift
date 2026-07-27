@@ -10,13 +10,14 @@ enum AssistantDecision {
     case reschedule(interpretation: String, targetEventID: UUID, newStart: Date, newEnd: Date)
     case reorganize(interpretation: String, moves: [PlannedMove], displaced: [UUID])
     case edit(interpretation: String, edits: [EventEdit])
+    case delete(interpretation: String, targetEventIDs: [UUID])
     case generate(interpretation: String, events: [EventDraft])
     case clarify(question: String, options: [String])
 
     var interpretation: String {
         switch self {
         case .add(let i, _, _, _), .move(let i, _, _, _, _), .reschedule(let i, _, _, _),
-             .reorganize(let i, _, _), .edit(let i, _), .generate(let i, _):
+             .reorganize(let i, _, _), .edit(let i, _), .delete(let i, _), .generate(let i, _):
             return i
         case .clarify(let question, _):
             return question
@@ -241,6 +242,8 @@ private struct RawInterpret: Decodable {
     let displaced: [String]?
     // edit
     let edits: [Edit]?
+    // delete
+    let targetEventIds: [String]?
     // generate
     let events: [Draft]?
     // clarify
@@ -323,6 +326,9 @@ extension AIService {
                     return edit
                 }
             )
+        case "delete":
+            guard let ids = raw.targetEventIds, !ids.isEmpty else { throw AIServiceError.invalidResponse }
+            return .delete(interpretation: raw.interpretation, targetEventIDs: try ids.map { try uuid($0) })
         case "generate":
             guard let events = raw.events, !events.isEmpty else { throw AIServiceError.invalidResponse }
             return .generate(interpretation: raw.interpretation, events: try events.map(draft))

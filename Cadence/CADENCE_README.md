@@ -63,6 +63,21 @@ event. No AI involved anywhere in the import.
   free slots). Locally deleted imports are **tombstoned** on their source so
   a re-sync never resurrects them (delete hooks live in `ScheduleView` and
   `MissedEventsView`).
+- **Locally-edited times win**: when the user moves an imported event's time
+  in Cadence (event editor's force-update, or a notification snooze), the event
+  is flagged `Event.locallyEditedTime` and re-sync no longer reverts its time
+  to the source's — title/`seriesID` updates still apply, and a source deletion
+  still removes it. This replaces the old workaround of disabling the whole
+  calendar's sync to keep an edit.
+- **Managing sync from the import screen**: connected device calendars are
+  grouped by account into collapsible `DisclosureGroup`s, each with a master
+  toggle (on only when every calendar in the group is enabled) that
+  enables/disables the whole group at once. **"Pause all syncing"**
+  (`CalendarImportService.pauseAllSyncing`) flips every source's `isEnabled`
+  off in one tap without touching events — the bulk version of the per-calendar
+  toggle; re-enabling any calendar resumes and triggers a sync. The account is
+  stored on `CalendarImportSource.accountName` (nil for feeds and pre-existing
+  sources, which group under "Other calendars").
 - **Category mapping**: calendar title → existing category (case-insensitive)
   else a shared `"Imported"` category, created on first use. Local only,
   never Claude.
@@ -594,6 +609,7 @@ discriminated union on `intent`, always with a human-readable
 | `reschedule` | Re-slot a missed/displaced event | move it to the returned slot |
 | `reorganize` | Multi-event cleanup: `moves` + `displaced` ids | apply moves; mark displaced |
 | `edit` | Change the details of existing events — per-event `title`, `category`, and/or time (`newStart`+`newEnd`) in an `edits` array | apply each non-nil field in `applyEdits`; a time change reschedules that event's notifications and resets it to pending; a new category name is created on the fly |
+| `delete` | Remove/cancel existing events (targeted by stable ids in `targetEventIds`) | hard-delete each in `applyDelete` — cancels notifications and tombstones imported events (mirrors `ScheduleView.deleteEvent`); "cancel" == delete since there is no cancelled status |
 | `generate` | Batch of generated events for a goal | insert the batch |
 | `clarify` | Ambiguous request — question + options | show question card; answer feeds back into a new interpret call |
 
@@ -606,7 +622,8 @@ Key rules (from `ai-planner.md`):
   prompt is hardened to return `clarify` instead of a wrong mutation.
 - **Always-confirm** — every mutating intent renders a preview card in
   `AIInputView` (add/conflict/suggest, move/reschedule, reorganize plan,
-  generate list) and nothing is written until the user confirms. The box also
+  edit changes, delete list, generate list) and nothing is written until the
+  user confirms — the delete card is styled destructively (red). The box also
   shows a helper line + tappable example chips to teach its range.
 - **`EventStatus.displaced`** — reorganize may set events aside; they get
   status `.displaced`, surface in a **"Needs rescheduling" tray** inside

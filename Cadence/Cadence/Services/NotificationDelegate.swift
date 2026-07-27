@@ -57,6 +57,8 @@ final class NotificationDelegate: NSObject, UNUserNotificationCenterDelegate {
             let offset: TimeInterval = 15 * 60
             event.startTime = event.startTime.addingTimeInterval(offset)
             event.endTime   = event.endTime.addingTimeInterval(offset)
+            // Imported events: lock this time so the next sync doesn't revert it.
+            if event.source == .imported { event.locallyEditedTime = true }
             let lead = reminderLead(context: context)
             event.notificationIdentifier = svc.scheduleEventReminder(for: event, reminderMinutes: lead)
             svc.scheduleEventStartAlert(for: event, reminderMinutes: lead)

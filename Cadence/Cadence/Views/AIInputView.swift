@@ -27,6 +27,7 @@ struct AIInputView: View {
         "find me 2h for taxes this week",
         "clean up my afternoon",
         "mark my meetings as Work",
+        "cancel my dentist appointment",
         "plan my week's workouts",
     ]
 
@@ -134,6 +135,8 @@ struct AIInputView: View {
             reorganizeCard(interpretation: interpretation, moves: moves, displaced: displaced)
         case .edit(let interpretation, let edits):
             editCard(interpretation: interpretation, edits: edits)
+        case .delete(let interpretation, let targetIDs):
+            deleteCard(interpretation: interpretation, targetIDs: targetIDs)
         case .generate(let interpretation, let events):
             generateCard(interpretation: interpretation, drafts: events)
         case .clarify(let question, let options):
@@ -381,6 +384,52 @@ struct AIInputView: View {
         }
     }
 
+    /// Preview for the "delete" intent: lists every event that will be removed
+    /// so the user confirms exactly what disappears. Styled destructively (red)
+    /// to set it apart from the additive cards.
+    private func deleteCard(interpretation: String, targetIDs: [UUID]) -> some View {
+        let targets = allEvents.filter { targetIDs.contains($0.id) }
+        return VStack(alignment: .leading, spacing: 14) {
+            Label(interpretation, systemImage: "trash.fill")
+                .font(.caption.weight(.semibold))
+                .foregroundColor(.red)
+
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(targets, id: \.id) { event in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(event.title).font(.subheadline.weight(.semibold))
+                            .foregroundColor(theme.text)
+                        Text(formatSlot(start: event.startTime, end: event.endTime))
+                            .font(.caption)
+                            .foregroundColor(theme.text2)
+                    }
+                }
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(theme.cardSurface)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+
+            if targets.isEmpty {
+                Text("Those events are no longer on your schedule.")
+                    .font(.subheadline)
+                    .foregroundColor(theme.text2)
+            } else {
+                Button("Delete (\(targets.count))") {
+                    applyDelete(targetIDs: targetIDs)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 13)
+                .background(Color.red)
+                .foregroundColor(.white)
+                .font(.subheadline.weight(.semibold))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+        }
+        .padding()
+        .cardStyle()
+    }
+
     private func generateCard(interpretation: String, drafts: [EventDraft]) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             interpretationHeader(interpretation, icon: "wand.and.stars")
@@ -622,6 +671,19 @@ struct AIInputView: View {
                 event.status = .pending
                 scheduleNotifications(for: event, prefs: prefs, svc: svc)
             }
+        }
+        finalize()
+    }
+
+    /// Hard-deletes the confirmed events from the "delete" intent, mirroring the
+    /// manual swipe-to-delete in ScheduleView: cancel each event's notifications
+    /// and tombstone imported ones so a later calendar sync doesn't re-add them.
+    private func applyDelete(targetIDs: [UUID]) {
+        let svc = NotificationService()
+        for event in allEvents where targetIDs.contains(event.id) {
+            svc.cancelEventNotifications(for: event)
+            CalendarImportService.shared.noteLocalDeletion(of: event, context: context)
+            context.delete(event)
         }
         finalize()
     }

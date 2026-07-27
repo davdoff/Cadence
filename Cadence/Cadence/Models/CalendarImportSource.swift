@@ -11,6 +11,11 @@ final class CalendarImportSource {
     var kindRaw: String
     var displayName: String     // e.g. "Work (Google)" or "Uni Timetable"
     var identifier: String      // EKCalendar.calendarIdentifier OR the feed URL
+    // The device account this calendar belongs to (EKCalendar.source.title,
+    // e.g. "iCloud", "Google") — used to group calendars in the import UI.
+    // nil for feeds and for sources connected before this field existed.
+    // Defaulted inline for lightweight migration.
+    var accountName: String? = nil
     var lastSyncedAt: Date?
     var isEnabled: Bool
     // externalIdentifiers the user deleted locally — the sync pass skips

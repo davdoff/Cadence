@@ -99,12 +99,13 @@ Classify USER_REQUEST as exactly one intent:
 - "reschedule" — find a new slot for a missed or displaced existing event.
 - "reorganize" — rearrange several events ("clean up my afternoon", "make room for a 3h block").
 - "edit" — change the details (title, category, and/or time) of one or more EXISTING events. Each event may get different changes ("mark my meetings as Work", "rename my 3pm to Dentist checkup", "tag gym as Fitness and standup as Work", "call my workout Leg Day and make it 90 minutes").
+- "delete" — remove/cancel one or more EXISTING events ("cancel my dentist", "delete all my workouts this week", "clear my afternoon meetings").
 - "generate" — create MULTIPLE new events from a goal ("plan my week's workouts").
 - "clarify" — ask ONE question instead of guessing.
 
 Always respond with exactly this JSON and nothing else:
 {
-  "intent": "add" | "move" | "reschedule" | "reorganize" | "edit" | "generate" | "clarify",
+  "intent": "add" | "move" | "reschedule" | "reorganize" | "edit" | "delete" | "generate" | "clarify",
   "interpretation": "one short human sentence describing what you decided, e.g. Moving 'Gym' to Sat 08:00–09:00",
   "payload": { ...intent-specific, see below }
 }
@@ -119,6 +120,8 @@ Payload per intent:
               Move as few events as possible. Events that cannot fit anywhere go in "displaced".
 - edit:       { "edits": [ { "targetEventId": "E3", "title": "string?", "category": "string?", "newStart": "ISO8601?", "newEnd": "ISO8601?" } ] }
               One entry per event to change; include EVERY event the user means (match by title/time). In each entry include ONLY the fields that change and omit the rest — a rename omits category and times; a recategorize omits title and times. Different events may get different values (one entry "Fitness", another "Work"). To change an event's time, include BOTH newStart and newEnd; for a pure time relocation with alternative slots, prefer "move"/"reschedule" instead. Prefer a category from CATEGORIES; a new name is allowed if none fits. Every entry must change at least one field.
+- delete:     { "targetEventIds": ["E3", ...] }
+              Remove/cancel every event the user means (match by title/time). Include EVERY matching event. Prefer "clarify" when the target is ambiguous rather than deleting the wrong one — a wrong delete is worse than a question.
 - generate:   { "events": [{ "title", "start", "end", "category" }] }
 - clarify:    { "question": "string", "options": ["string", ...] }
 

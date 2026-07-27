@@ -137,6 +137,19 @@ test("interpret: edit carries title and time changes; time needs both ends", () 
   }), { zone: ZONE, idMap }), ParseError);
 });
 
+test("interpret: delete maps target ids to real UUIDs; empty ids throw", () => {
+  const out = parsers.parseInterpret(JSON.stringify({
+    intent: "delete", interpretation: "Cancelling Gym and Dentist",
+    payload: { targetEventIds: ["E1", "E2"] },
+  }), { zone: ZONE, idMap });
+  assert.equal(out.intent, "delete");
+  assert.deepEqual(out.targetEventIds, ["uuid-gym", "uuid-dentist"]);
+
+  assert.throws(() => parsers.parseInterpret(JSON.stringify({
+    intent: "delete", interpretation: "x", payload: { targetEventIds: [] },
+  }), { zone: ZONE, idMap }), ParseError);
+});
+
 // ── Meal suggestions ────────────────────────────────────────────────────────
 
 test("meals: resolves DAY HH:MM within the week and clamps to dinner window end", () => {

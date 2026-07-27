@@ -151,6 +151,13 @@ function parseInterpret(text, { zone, idMap }) {
         }),
       };
     }
+    case "delete": {
+      if (!Array.isArray(p.targetEventIds) || p.targetEventIds.length === 0) fail("delete without targetEventIds");
+      return {
+        intent, interpretation,
+        targetEventIds: p.targetEventIds.map((t) => mapEventId(str(t, "targetEventIds[]"), idMap)),
+      };
+    }
     case "generate": {
       if (!Array.isArray(p.events) || p.events.length === 0) fail("generate without events");
       return { intent, interpretation, events: p.events.map((e) => parseEventDraft(e, zone)) };

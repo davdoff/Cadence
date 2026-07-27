@@ -196,7 +196,11 @@ final class CalendarImportService {
         prefs: UserPreferences,
         notifications: NotificationService
     ) -> Bool {
-        let timeChanged = event.startTime != instance.start || event.endTime != instance.end
+        // A locally-edited time wins: the user moved this occurrence in Cadence,
+        // so never revert it to the source's time (§1 exception). Title/series
+        // updates from the source still apply.
+        let timeChanged = !event.locallyEditedTime
+            && (event.startTime != instance.start || event.endTime != instance.end)
         let titleChanged = event.title != instance.title
         // Backfills the recurring tag onto events imported before seriesID
         // existed — one sync retro-marks them.
@@ -252,6 +256,17 @@ final class CalendarImportService {
         (try? context.fetch(FetchDescriptor<CalendarImportSource>(
             sortBy: [SortDescriptor(\.displayName)]
         ))) ?? []
+    }
+
+    /// Pauses syncing for every connected source without touching their events
+    /// — the bulk version of flipping each source's toggle off. Already-imported
+    /// events stay put and stop being overwritten; re-enabling any source
+    /// resumes syncing.
+    func pauseAllSyncing(context: ModelContext) {
+        for source in allSources(context: context) where source.isEnabled {
+            source.isEnabled = false
+        }
+        try? context.save()
     }
 
     /// Removes a source and every event imported from it.

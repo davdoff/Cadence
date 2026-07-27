@@ -26,6 +26,11 @@ final class Event {
     // the source's base identifier — no EventSeries row, the source calendar
     // owns the rule. Defaulted inline for lightweight migration.
     var seriesID: String? = nil
+    // Imported events only: set when the user manually changes the event's
+    // time in Cadence. Re-syncs then preserve that time instead of reverting
+    // it to the source's (title/series updates still apply). Defaulted inline
+    // for lightweight migration.
+    var locallyEditedTime: Bool = false
 
     @Relationship
     var category: Category?

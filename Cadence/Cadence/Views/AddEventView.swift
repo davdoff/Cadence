@@ -362,6 +362,8 @@ struct AddEventView: View {
             event.startTime = combinedStart
             event.endTime = combinedEnd
             event.status = .pending
+            // Imported events: lock this time so the next sync doesn't revert it.
+            if event.source == .imported { event.locallyEditedTime = true }
             if svc.isNotificationEnabled(for: event, prefs: prefs) {
                 event.notificationIdentifier = svc.scheduleEventReminder(
                     for: event, reminderMinutes: prefs.defaultReminderMinutes
