@@ -25,6 +25,7 @@ function parsePrefs(raw = {}) {
     workEndHour: p.workEndHour ?? 18,
     bufferMinutes: p.bufferMinutes ?? 15,
     priorityCategories: Array.isArray(p.priorityCategories) ? p.priorityCategories : [],
+    allCategories: Array.isArray(p.allCategories) ? p.allCategories : [],
     aiLevel: p.aiLevel ?? "balanced",
     avoidScheduling: Array.isArray(p.avoidScheduling)
       ? p.avoidScheduling.map((a) => ({

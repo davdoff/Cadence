@@ -182,7 +182,11 @@ every-X cadences), and an optional end date.
   `EventBulkService.setCategory` reassigns the category on every
   case-insensitive title match in one save (pure OS-blind service;
   `siblingCount` drives whether the toggle appears). Native Cadence series get
-  the richer occurrence-scope path instead (see §2.1).
+  the richer occurrence-scope path instead (see §2.1). The **AI planner** can
+  also change categories — among other event details — through the `edit`
+  intent, which applies a server-resolved list of per-event changes (title,
+  category, and/or time) after the user confirms them (see the AI planner
+  section).
 
 ### 4. Performance Reports
 - **Weekly** and **Monthly** views
@@ -589,6 +593,7 @@ discriminated union on `intent`, always with a human-readable
 | `move` | Move an existing event (targeted by stable id) | reschedule that event |
 | `reschedule` | Re-slot a missed/displaced event | move it to the returned slot |
 | `reorganize` | Multi-event cleanup: `moves` + `displaced` ids | apply moves; mark displaced |
+| `edit` | Change the details of existing events — per-event `title`, `category`, and/or time (`newStart`+`newEnd`) in an `edits` array | apply each non-nil field in `applyEdits`; a time change reschedules that event's notifications and resets it to pending; a new category name is created on the fly |
 | `generate` | Batch of generated events for a goal | insert the batch |
 | `clarify` | Ambiguous request — question + options | show question card; answer feeds back into a new interpret call |
 

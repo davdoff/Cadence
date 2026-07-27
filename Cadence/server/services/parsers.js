@@ -129,6 +129,28 @@ function parseInterpret(text, { zone, idMap }) {
         displaced: (p.displaced ?? []).map((t) => mapEventId(str(t, "displaced[]"), idMap)),
       };
     }
+    case "edit": {
+      if (!Array.isArray(p.edits) || p.edits.length === 0) fail("edit without edits");
+      return {
+        intent, interpretation,
+        edits: p.edits.map((e) => {
+          const edit = { targetEventId: mapEventId(str(e?.targetEventId, "edits.targetEventId"), idMap) };
+          if (e?.title != null) edit.title = str(e.title, "edits.title");
+          if (e?.category != null) edit.category = str(e.category, "edits.category");
+          const hasStart = e?.newStart != null;
+          const hasEnd = e?.newEnd != null;
+          if (hasStart || hasEnd) {
+            if (!hasStart || !hasEnd) fail("edit time change needs both newStart and newEnd");
+            edit.newStart = isoOrFail(e.newStart, zone, "edits.newStart");
+            edit.newEnd = isoOrFail(e.newEnd, zone, "edits.newEnd");
+          }
+          if (edit.title === undefined && edit.category === undefined && edit.newStart === undefined) {
+            fail("edit entry changes no fields");
+          }
+          return edit;
+        }),
+      };
+    }
     case "generate": {
       if (!Array.isArray(p.events) || p.events.length === 0) fail("generate without events");
       return { intent, interpretation, events: p.events.map((e) => parseEventDraft(e, zone)) };

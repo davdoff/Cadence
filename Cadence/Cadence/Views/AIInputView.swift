@@ -26,6 +26,7 @@ struct AIInputView: View {
         "move my gym to tomorrow morning",
         "find me 2h for taxes this week",
         "clean up my afternoon",
+        "mark my meetings as Work",
         "plan my week's workouts",
     ]
 
@@ -131,6 +132,8 @@ struct AIInputView: View {
                      label: "Reschedule")
         case .reorganize(let interpretation, let moves, let displaced):
             reorganizeCard(interpretation: interpretation, moves: moves, displaced: displaced)
+        case .edit(let interpretation, let edits):
+            editCard(interpretation: interpretation, edits: edits)
         case .generate(let interpretation, let events):
             generateCard(interpretation: interpretation, drafts: events)
         case .clarify(let question, let options):
@@ -308,6 +311,74 @@ struct AIInputView: View {
         }
         .padding()
         .cardStyle()
+    }
+
+    /// Preview for the "edit" intent: each event lists the specific fields that
+    /// will change (title, category, time), so the user approves exactly what
+    /// the AI proposes before anything is written.
+    private func editCard(interpretation: String, edits: [EventEdit]) -> some View {
+        // Keep only edits whose target still exists, paired with the event.
+        let live: [(EventEdit, Event)] = edits.compactMap { edit in
+            allEvents.first(where: { $0.id == edit.targetEventID }).map { (edit, $0) }
+        }
+        return VStack(alignment: .leading, spacing: 14) {
+            interpretationHeader(interpretation, icon: "square.and.pencil")
+
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(Array(live.enumerated()), id: \.offset) { _, pair in
+                    editRow(edit: pair.0, event: pair.1)
+                }
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(theme.cardSurface)
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+
+            if live.isEmpty {
+                Text("Those events are no longer on your schedule.")
+                    .font(.subheadline)
+                    .foregroundColor(theme.text2)
+            } else {
+                confirmButton("Apply changes (\(live.count))") {
+                    applyEdits(live.map(\.0))
+                }
+            }
+        }
+        .padding()
+        .cardStyle()
+    }
+
+    /// One event's before/after within the edit card. Unchanged fields render
+    /// plainly; changed ones show the new value (title/time struck-through old).
+    @ViewBuilder
+    private func editRow(edit: EventEdit, event: Event) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            if let newTitle = edit.title {
+                Text(event.title).font(.caption).strikethrough().foregroundColor(theme.text2)
+                Text(newTitle).font(.subheadline.weight(.semibold)).foregroundColor(theme.text)
+            } else {
+                Text(event.title).font(.subheadline.weight(.semibold)).foregroundColor(theme.text)
+            }
+
+            if edit.changesTime, let s = edit.newStart, let e = edit.newEnd {
+                Text(formatSlot(start: event.startTime, end: event.endTime))
+                    .font(.caption).strikethrough().foregroundColor(theme.text2)
+                Text(formatSlot(start: s, end: e))
+                    .font(.caption.weight(.semibold)).foregroundColor(theme.text)
+            } else {
+                Text(formatSlot(start: event.startTime, end: event.endTime))
+                    .font(.caption).foregroundColor(theme.text2)
+            }
+
+            if let category = edit.category {
+                Text("→ \(category)")
+                    .font(.caption)
+                    .foregroundColor(theme.chipText)
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .background(theme.chipBg)
+                    .clipShape(Capsule())
+            }
+        }
     }
 
     private func generateCard(interpretation: String, drafts: [EventDraft]) -> some View {
@@ -526,6 +597,49 @@ struct AIInputView: View {
             event.status = .displaced
         }
         finalize()
+    }
+
+    /// Applies confirmed per-event edits from the "edit" intent: title,
+    /// category, and/or time, each only when the AI proposed a change. A time
+    /// change reschedules that event's notifications and resets it to pending
+    /// (like a move); title/category changes touch no notifications. All in one
+    /// save.
+    private func applyEdits(_ edits: [EventEdit]) {
+        let prefs = prefsResults.first ?? UserPreferences()
+        let svc = NotificationService()
+        for edit in edits {
+            guard let event = allEvents.first(where: { $0.id == edit.targetEventID }) else { continue }
+            if let title = edit.title?.trimmingCharacters(in: .whitespaces), !title.isEmpty {
+                event.title = title
+            }
+            if let name = edit.category {
+                event.category = resolveOrCreateCategory(named: name)
+            }
+            if edit.changesTime, let newStart = edit.newStart, let newEnd = edit.newEnd {
+                svc.cancelEventNotifications(for: event)
+                event.startTime = newStart
+                event.endTime = newEnd
+                event.status = .pending
+                scheduleNotifications(for: event, prefs: prefs, svc: svc)
+            }
+        }
+        finalize()
+    }
+
+    /// Finds an existing category by case-insensitive name, or creates one when
+    /// the AI named a category that doesn't exist yet — so an edit request never
+    /// fails just because the category is new (David: never refuse an event task).
+    private func resolveOrCreateCategory(named name: String) -> Category? {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return nil }
+        if let existing = categories.first(where: { $0.name.lowercased() == trimmed.lowercased() }) {
+            return existing
+        }
+        let palette = AddCategoryView.palette
+        let colorHex = palette[abs(trimmed.hashValue) % palette.count]
+        let created = Category(name: trimmed, colorHex: colorHex)
+        context.insert(created)
+        return created
     }
 
     private func scheduleNotifications(for event: Event, prefs: UserPreferences, svc: NotificationService) {

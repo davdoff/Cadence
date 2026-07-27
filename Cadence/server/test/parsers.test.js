@@ -94,6 +94,49 @@ test("interpret: reorganize maps moves and displaced; missing interpretation thr
   }), { zone: ZONE, idMap }), ParseError);
 });
 
+test("interpret: edit maps ids and passes per-event category; empty edits throw", () => {
+  const out = parsers.parseInterpret(JSON.stringify({
+    intent: "edit", interpretation: "Tagging Gym Fitness and Dentist Health",
+    payload: { edits: [
+      { targetEventId: "E1", category: "Fitness" },
+      { targetEventId: "E2", category: "Health" },
+    ] },
+  }), { zone: ZONE, idMap });
+  assert.equal(out.intent, "edit");
+  assert.equal(out.edits[0].targetEventId, "uuid-gym");
+  assert.equal(out.edits[0].category, "Fitness");
+  assert.equal(out.edits[1].targetEventId, "uuid-dentist");
+  assert.equal(out.edits[1].category, "Health");
+
+  assert.throws(() => parsers.parseInterpret(JSON.stringify({
+    intent: "edit", interpretation: "x", payload: { edits: [] },
+  }), { zone: ZONE, idMap }), ParseError);
+});
+
+test("interpret: edit carries title and time changes; time needs both ends", () => {
+  const out = parsers.parseInterpret(JSON.stringify({
+    intent: "edit", interpretation: "Renaming and extending Gym",
+    payload: { edits: [
+      { targetEventId: "E1", title: "Leg Day", newStart: "2026-07-07T08:00:00+03:00", newEnd: "2026-07-07T09:30:00+03:00" },
+    ] },
+  }), { zone: ZONE, idMap });
+  assert.equal(out.edits[0].title, "Leg Day");
+  assert.equal(out.edits[0].newStart, "2026-07-07T08:00:00+03:00");
+  assert.equal(out.edits[0].newEnd, "2026-07-07T09:30:00+03:00");
+  assert.equal(out.edits[0].category, undefined);
+
+  // A time change with only one end is a contract violation.
+  assert.throws(() => parsers.parseInterpret(JSON.stringify({
+    intent: "edit", interpretation: "x",
+    payload: { edits: [{ targetEventId: "E1", newStart: "2026-07-07T08:00:00+03:00" }] },
+  }), { zone: ZONE, idMap }), ParseError);
+
+  // An entry that changes nothing is rejected.
+  assert.throws(() => parsers.parseInterpret(JSON.stringify({
+    intent: "edit", interpretation: "x", payload: { edits: [{ targetEventId: "E1" }] },
+  }), { zone: ZONE, idMap }), ParseError);
+});
+
 // ── Meal suggestions ────────────────────────────────────────────────────────
 
 test("meals: resolves DAY HH:MM within the week and clamps to dinner window end", () => {

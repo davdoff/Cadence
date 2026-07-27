@@ -9,13 +9,14 @@ enum AssistantDecision {
     case move(interpretation: String, targetEventID: UUID, newStart: Date, newEnd: Date, alternatives: [EventDraft])
     case reschedule(interpretation: String, targetEventID: UUID, newStart: Date, newEnd: Date)
     case reorganize(interpretation: String, moves: [PlannedMove], displaced: [UUID])
+    case edit(interpretation: String, edits: [EventEdit])
     case generate(interpretation: String, events: [EventDraft])
     case clarify(question: String, options: [String])
 
     var interpretation: String {
         switch self {
         case .add(let i, _, _, _), .move(let i, _, _, _, _), .reschedule(let i, _, _, _),
-             .reorganize(let i, _, _), .generate(let i, _):
+             .reorganize(let i, _, _), .edit(let i, _), .generate(let i, _):
             return i
         case .clarify(let question, _):
             return question
@@ -27,6 +28,20 @@ struct PlannedMove {
     var targetEventID: UUID
     var newStart: Date
     var newEnd: Date
+}
+
+/// One event's confirmed changes from the "edit" intent. Only the non-nil
+/// fields change; `newStart`/`newEnd` are always set together (a time change)
+/// or both nil. A nil `category` leaves the category alone — clearing a
+/// category is not expressible here (nothing in the box asks for it).
+struct EventEdit {
+    var targetEventID: UUID
+    var title: String? = nil
+    var category: String? = nil
+    var newStart: Date? = nil
+    var newEnd: Date? = nil
+
+    var changesTime: Bool { newStart != nil && newEnd != nil }
 }
 
 // MARK: - Request DTOs (BACKEND_PLAN.md §3 shared request objects)
@@ -64,6 +79,7 @@ struct PrefsSnapshotDTO: Encodable {
     let workEndHour: Int
     let bufferMinutes: Int
     let priorityCategories: [String]
+    let allCategories: [String]
     let aiLevel: String
     let avoidScheduling: [AvoidBlock]
     let dinnerWindow: DinnerWindow
@@ -76,6 +92,7 @@ struct PrefsSnapshotDTO: Encodable {
         priorityCategories = categories
             .filter { p.priorityCategoryIDs.contains($0.id) }
             .map(\.name)
+        allCategories = categories.map(\.name)
         switch p.aiAggressiveness {
         case ...2:  aiLevel = "passive"
         case 3:     aiLevel = "balanced"
@@ -201,6 +218,13 @@ private struct RawInterpret: Decodable {
     struct Draft: Decodable { let title: String; let start: String; let end: String; let category: String }
     struct Slot: Decodable { let start: String; let end: String }
     struct Move: Decodable { let targetEventId: String; let newStart: String; let newEnd: String }
+    struct Edit: Decodable {
+        let targetEventId: String
+        let title: String?
+        let category: String?
+        let newStart: String?
+        let newEnd: String?
+    }
 
     let intent: String
     let interpretation: String
@@ -215,6 +239,8 @@ private struct RawInterpret: Decodable {
     // reorganize
     let moves: [Move]?
     let displaced: [String]?
+    // edit
+    let edits: [Edit]?
     // generate
     let events: [Draft]?
     // clarify
@@ -277,6 +303,25 @@ extension AIService {
                                 newEnd: try date($0.newEnd))
                 },
                 displaced: try (raw.displaced ?? []).map { try uuid($0) }
+            )
+        case "edit":
+            guard let items = raw.edits, !items.isEmpty else { throw AIServiceError.invalidResponse }
+            return .edit(
+                interpretation: raw.interpretation,
+                edits: try items.map { item in
+                    var edit = EventEdit(
+                        targetEventID: try uuid(item.targetEventId),
+                        title: item.title.flatMap { $0.isEmpty ? nil : $0 },
+                        category: item.category.flatMap { $0.isEmpty ? nil : $0 }
+                    )
+                    // The server guarantees start/end arrive together; if only
+                    // one survives here, treat the whole edit as no-time.
+                    if let s = item.newStart, let e = item.newEnd {
+                        edit.newStart = try date(s)
+                        edit.newEnd = try date(e)
+                    }
+                    return edit
+                }
             )
         case "generate":
             guard let events = raw.events, !events.isEmpty else { throw AIServiceError.invalidResponse }

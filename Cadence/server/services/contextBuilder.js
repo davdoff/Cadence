@@ -70,12 +70,15 @@ DEADLINE: ${ymd(deadline)}
 WEEKLY_HOURS: ${weeklyHours}
 CONSTRAINTS: "${constraints}"`);
 
-const buildInterpret = ({ now, text, scheduleText, freeSlots, prefs }) =>
-  withNow(now, `SCHEDULE:
+const buildInterpret = ({ now, text, scheduleText, freeSlots, prefs }) => {
+  const categoriesLine =
+    prefs.allCategories.length > 0 ? `\nCATEGORIES: [${prefs.allCategories.join(", ")}]` : "";
+  return withNow(now, `SCHEDULE:
 ${scheduleText}
 FREE_SLOTS: ${slotsLine(freeSlots)}
-USER_REQUEST: "${text}"
+USER_REQUEST: "${text}"${categoriesLine}
 PREFS: ${prefsLine(prefs)}`);
+};
 
 const buildGenerate = ({ now, period, goals, freeSlots, prefs }) =>
   withNow(now, `PERIOD: ${ymd(period.start)} to ${ymd(period.end)}
