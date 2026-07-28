@@ -611,6 +611,8 @@ discriminated union on `intent`, always with a human-readable
 | `edit` | Change the details of existing events — per-event `title`, `category`, and/or time (`newStart`+`newEnd`) in an `edits` array | apply each non-nil field in `applyEdits`; a time change reschedules that event's notifications and resets it to pending; a new category name is created on the fly |
 | `delete` | Remove/cancel existing events (targeted by stable ids in `targetEventIds`) | hard-delete each in `applyDelete` — cancels notifications and tombstones imported events (mirrors `ScheduleView.deleteEvent`); "cancel" == delete since there is no cancelled status |
 | `generate` | Batch of generated events for a goal | insert the batch |
+| `summarize` | **Read-only** overview / analytics of the schedule (`summary` prose) | show a display-only answer card — no confirm, no save/sync |
+| `query` | **Read-only** answer to one specific calendar question — next/last occurrence, availability, a single event's time (`answer` prose) | show the same display-only answer card — no confirm, no save/sync |
 | `clarify` | Ambiguous request — question + options | show question card; answer feeds back into a new interpret call |
 
 Key rules (from `ai-planner.md`):
@@ -618,13 +620,37 @@ Key rules (from `ai-planner.md`):
 - **Server computes free slots** from the event snapshots + prefs; it also
   builds a compact schedule string with a **stable id map** so `move` /
   `reschedule` / `reorganize` can point at specific events.
+- **Server computes analytics, model narrates** — every interpret payload also
+  carries a `STATS` line (upcoming-week totals + past-30-day status counts), an
+  id-less `RECENT_PAST` list, and an id-less `NEXT_UP` list (the next few events
+  *beyond* the visible week), all from `server/services/stats.js`. The read-only
+  intents ground their prose in these *verified* numbers/dates rather than
+  counting for themselves: `summarize` uses `STATS`/`RECENT_PAST`; `query`
+  (point-lookups) also reads `NEXT_UP` so "when's my next X" works when the next
+  occurrence is past the 7-day `SCHEDULE` window. `RECENT_PAST` and `NEXT_UP` are
+  deliberately id-less so those events can never be targeted by `move`/`delete` —
+  mutations stay scoped to the visible week. For the history side the client's
+  `interpret` call ships a wider event window (`interpretHistoryDays`), unlike the
+  forward-only snapshot the other routes send. This is distinct from the local
+  Performance Reports screen (§4), which owns deep historical stats.
 - **Clarify over guessing** — when the target event or time is ambiguous, the
   prompt is hardened to return `clarify` instead of a wrong mutation.
 - **Always-confirm** — every mutating intent renders a preview card in
   `AIInputView` (add/conflict/suggest, move/reschedule, reorganize plan,
   edit changes, delete list, generate list) and nothing is written until the
-  user confirms — the delete card is styled destructively (red). The box also
-  shows a helper line + tappable example chips to teach its range.
+  user confirms — the delete card is styled destructively (red). The exceptions
+  are the two read-only intents, `summarize` and `query`, which share one
+  display-only answer card (no confirm, no save). The box also shows a helper
+  line + tappable example chips to teach its range.
+- **Conversational follow-ups** — the read-only answer card carries a "Ask a
+  follow-up…" field so a refinement ("what about swimming?", "no, only the work
+  ones") lands without retyping. The device holds the recent Q&A turns and replays
+  them to the (still **stateless**) server as a bounded `CONVERSATION` block, so
+  the model resolves references against the prior answer; `USER_REQUEST` is always
+  the latest message. The top input box starts a **fresh** thread, "Start over"
+  clears it, and history is capped (`MAX_HISTORY_TURNS`, `server/lib/dto.js`). A
+  follow-up may still resolve to an action intent — it just yields the normal
+  confirm card. (This is the general form of the older `clarify` fold-back.)
 - **`EventStatus.displaced`** — reorganize may set events aside; they get
   status `.displaced`, surface in a **"Needs rescheduling" tray** inside
   `MissedEventsView`, and are **excluded from missed/completion stats**

@@ -21,6 +21,10 @@ struct AIInputView: View {
     // The text that produced a clarify question — answers are appended to it.
     @State private var clarifyBase: String?
     @State private var showPlanSheet = false
+    // Follow-up thread for the read-only answer card: prior Q&A turns replayed to
+    // the (stateless) server so refinements resolve against the last answer.
+    @State private var turns: [ConversationTurn] = []
+    @State private var followUpText = ""
 
     private static let exampleChips = [
         "move my gym to tomorrow morning",
@@ -29,6 +33,8 @@ struct AIInputView: View {
         "mark my meetings as Work",
         "cancel my dentist appointment",
         "plan my week's workouts",
+        "summarize my week",
+        "when's my next gym?",
     ]
 
     var body: some View {
@@ -139,6 +145,10 @@ struct AIInputView: View {
             deleteCard(interpretation: interpretation, targetIDs: targetIDs)
         case .generate(let interpretation, let events):
             generateCard(interpretation: interpretation, drafts: events)
+        case .summarize(let interpretation, let summary):
+            answerCard(interpretation: interpretation, text: summary, icon: "chart.bar.doc.horizontal")
+        case .query(let interpretation, let answer):
+            answerCard(interpretation: interpretation, text: answer, icon: "magnifyingglass")
         case .clarify(let question, let options):
             clarifyCard(question: question, options: options)
         }
@@ -456,6 +466,75 @@ struct AIInputView: View {
         .cardStyle()
     }
 
+    /// The only READ-ONLY result: an overview/analytics answer. Nothing is
+    /// staged or written, so there's no confirm button and no `finalize()` —
+    /// just the narrative and a way to dismiss or ask again.
+    /// The read-only answer card shared by the two non-mutating intents
+    /// (summarize / query). Display-only: no confirm, no finalize/save/sync.
+    private func answerCard(interpretation: String, text: String, icon: String) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            interpretationHeader(interpretation, icon: icon)
+
+            Text(text)
+                .font(.subheadline)
+                .foregroundColor(theme.text)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding()
+                .background(theme.cardSurface)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+
+            // Follow-up: keep this answer on screen and refine it in place. The
+            // prior turn is replayed to the server so "what about…" has context.
+            HStack(alignment: .bottom, spacing: 8) {
+                TextField("Ask a follow-up…", text: $followUpText, axis: .vertical)
+                    .lineLimit(1...3)
+                    .padding(10)
+                    .background(theme.cardSurface)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                Button {
+                    submit(followUpText, continuing: true)
+                    followUpText = ""
+                } label: {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 30))
+                        .foregroundColor(canFollowUp ? theme.accent : theme.light)
+                }
+                .disabled(!canFollowUp || isLoading)
+            }
+
+            HStack(spacing: 10) {
+                Button("Start over") {
+                    decision = nil
+                    description = ""
+                    followUpText = ""
+                    turns = []
+                }
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(theme.accent)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 13)
+                .background(theme.cardSurface)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+
+                Button("Done") { dismiss() }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 13)
+                    .background(theme.accentGradient)
+                    .foregroundColor(.white)
+                    .font(.subheadline.weight(.semibold))
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+        }
+        .padding()
+        .cardStyle()
+    }
+
+    private var canFollowUp: Bool {
+        !followUpText.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
     private func clarifyCard(question: String, options: [String]) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             Label(question, systemImage: "questionmark.circle.fill")
@@ -535,7 +614,7 @@ struct AIInputView: View {
             Image(systemName: "sparkles")
                 .font(.system(size: 40))
                 .foregroundColor(theme.light)
-            Text("Your scheduling secretary: add, move, or reorganize events, or plan whole goals — in plain language.")
+            Text("Your scheduling secretary: add, move, or reorganize events, plan whole goals, or ask how your week's looking — in plain language.")
                 .font(.subheadline)
                 .foregroundColor(theme.text2)
                 .multilineTextAlignment(.center)
@@ -566,9 +645,13 @@ struct AIInputView: View {
 
     // MARK: - Actions
 
-    private func submit(_ text: String) {
+    /// `continuing` = a follow-up from the answer card: keep the thread and replay
+    /// it as context. A fresh submit (top box / chips) starts a new thread.
+    private func submit(_ text: String, continuing: Bool = false) {
         let trimmed = text.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return }
+        if !continuing { turns = [] }
+        let history = turns
         decision = nil
         errorMessage = nil
         isLoading = true
@@ -584,7 +667,8 @@ struct AIInputView: View {
                     text: trimmed,
                     events: events,
                     preferences: prefs,
-                    categories: cats
+                    categories: cats,
+                    history: history
                 )
                 await MainActor.run {
                     if case .clarify = result {
@@ -592,6 +676,11 @@ struct AIInputView: View {
                         if clarifyBase == nil { clarifyBase = trimmed }
                     } else {
                         clarifyBase = nil
+                    }
+                    // Grow the follow-up thread only for read-only answers — those
+                    // are the cards that expose a follow-up field.
+                    if let reply = result.readOnlyReply {
+                        turns.append(ConversationTurn(user: trimmed, assistant: reply))
                     }
                     decision = result
                     isLoading = false

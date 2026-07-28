@@ -12,15 +12,28 @@ enum AssistantDecision {
     case edit(interpretation: String, edits: [EventEdit])
     case delete(interpretation: String, targetEventIDs: [UUID])
     case generate(interpretation: String, events: [EventDraft])
+    case summarize(interpretation: String, summary: String)
+    case query(interpretation: String, answer: String)
     case clarify(question: String, options: [String])
 
     var interpretation: String {
         switch self {
         case .add(let i, _, _, _), .move(let i, _, _, _, _), .reschedule(let i, _, _, _),
-             .reorganize(let i, _, _), .edit(let i, _), .delete(let i, _), .generate(let i, _):
+             .reorganize(let i, _, _), .edit(let i, _), .delete(let i, _), .generate(let i, _),
+             .summarize(let i, _), .query(let i, _):
             return i
         case .clarify(let question, _):
             return question
+        }
+    }
+
+    /// The displayed text for the read-only intents (summarize/query), or nil for
+    /// the mutating/clarify intents. Used to record a follow-up thread turn.
+    var readOnlyReply: String? {
+        switch self {
+        case .summarize(_, let summary): return summary
+        case .query(_, let answer):      return answer
+        default:                         return nil
         }
     }
 }
@@ -117,7 +130,19 @@ struct PrefsSnapshotDTO: Encodable {
 
 // MARK: - Interpret
 
+/// One prior exchange in the "Ask AI" box's follow-up thread. The device holds
+/// the thread and replays it each call so the (stateless) server can resolve
+/// references like "what about swimming?" against the previous answer.
+struct ConversationTurn: Encodable {
+    let user: String
+    let assistant: String
+}
+
 extension AIService {
+
+    /// How much recent history interpret ships (for the "summarize" intent's
+    /// past-window analytics). Mirrors the server's STATS_PAST_DAYS.
+    static let interpretHistoryDays = 30
 
     /// The single call behind the "Ask AI" box: snapshot + text in, typed decision out.
     /// The server owns the prompt, free-slot computation, parsing, and retry-once.
@@ -125,7 +150,8 @@ extension AIService {
         text: String,
         events: [Event],
         preferences: UserPreferences,
-        categories: [Category]
+        categories: [Category],
+        history: [ConversationTurn] = []
     ) async throws -> AssistantDecision {
         let now = Date.now
         let iso = Self.deviceISOFormatter()
@@ -134,8 +160,12 @@ extension AIService {
             now: iso.string(from: now),
             timezone: TimeZone.current.identifier,
             text: text,
-            events: Self.snapshots(events, now: now, iso: iso),
-            prefs: PrefsSnapshotDTO(preferences: preferences, categories: categories)
+            // Ship recent history too, so the read-only "summarize" intent can
+            // report on the past (server computes STATS + RECENT_PAST from it).
+            events: Self.snapshots(events, now: now, iso: iso, historyDays: Self.interpretHistoryDays),
+            prefs: PrefsSnapshotDTO(preferences: preferences, categories: categories),
+            // Prior turns of the follow-up thread (empty for a fresh question).
+            history: history
         )
         let body = try JSONEncoder().encode(request)
         let responseData = try await exchange(route: "/v1/schedule/interpret", body: body)
@@ -211,6 +241,7 @@ private struct InterpretRequest: Encodable {
     let text: String
     let events: [EventSnapshotDTO]
     let prefs: PrefsSnapshotDTO
+    let history: [ConversationTurn]
 }
 
 /// Flat union as returned by the server's parseInterpret — the intent decides
@@ -246,6 +277,10 @@ private struct RawInterpret: Decodable {
     let targetEventIds: [String]?
     // generate
     let events: [Draft]?
+    // summarize
+    let summary: String?
+    // query
+    let answer: String?
     // clarify
     let question: String?
     let options: [String]?
@@ -332,6 +367,12 @@ extension AIService {
         case "generate":
             guard let events = raw.events, !events.isEmpty else { throw AIServiceError.invalidResponse }
             return .generate(interpretation: raw.interpretation, events: try events.map(draft))
+        case "summarize":
+            guard let summary = raw.summary, !summary.isEmpty else { throw AIServiceError.invalidResponse }
+            return .summarize(interpretation: raw.interpretation, summary: summary)
+        case "query":
+            guard let answer = raw.answer, !answer.isEmpty else { throw AIServiceError.invalidResponse }
+            return .query(interpretation: raw.interpretation, answer: answer)
         case "clarify":
             guard let question = raw.question else { throw AIServiceError.invalidResponse }
             return .clarify(question: question, options: raw.options ?? [])

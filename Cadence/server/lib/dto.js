@@ -69,4 +69,19 @@ function requireString(body, field) {
   return v;
 }
 
-module.exports = { parseBase, parsePrefs, parseEvent, parseEventList, requireString };
+// Conversation history for the "Ask AI" box's follow-ups: the device replays the
+// recent turns so the model can resolve references ("no, next week"). The backend
+// stays stateless — history lives on the device. Capped so payloads stay bounded.
+const MAX_HISTORY_TURNS = 6; // ~3 exchanges
+
+/** Lenient: drops non-conforming entries rather than 400ing a chatty client. */
+function parseHistory(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((t) => typeof t?.user === "string" && t.user.trim().length > 0
+                && typeof t?.assistant === "string" && t.assistant.trim().length > 0)
+    .map((t) => ({ user: t.user.trim(), assistant: t.assistant.trim() }))
+    .slice(-MAX_HISTORY_TURNS);
+}
+
+module.exports = { parseBase, parsePrefs, parseEvent, parseEventList, requireString, parseHistory, MAX_HISTORY_TURNS };

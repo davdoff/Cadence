@@ -14,12 +14,13 @@
 
 const express = require("express");
 const { callAndParse } = require("../lib/claude");
-const { parseBase, parsePrefs, parseEvent, parseEventList, requireString } = require("../lib/dto");
+const { parseBase, parsePrefs, parseEvent, parseEventList, requireString, parseHistory } = require("../lib/dto");
 const { badRequest } = require("../lib/errors");
 const { parseISO } = require("../lib/time");
 const scheduler = require("../services/scheduler");
 const build = require("../services/contextBuilder");
 const parsers = require("../services/parsers");
+const stats = require("../services/stats");
 const { expandGoalsToEvents } = require("../services/expander");
 const ics = require("../services/ics");
 const prompts = require("../prompts");
@@ -96,7 +97,18 @@ function createV1Router({ callClaude, fetchImpl = globalThis.fetch }) {
       windowEnd: c.now.plus({ days: 7 }),
       prefs: c.prefs,
     });
-    const payload = build.buildInterpret({ now: c.now, text, scheduleText, freeSlots, prefs: c.prefs });
+    // Read-only overview + history for the "summarize" intent (numbers computed
+    // here, never by the model). Past events reach c.events because interpret
+    // ships a wider window than the other routes.
+    const statsLine = stats.buildStatsLine({ events: c.events, now: c.now });
+    const recentPast = stats.recentPastBlock({ events: c.events, now: c.now });
+    // Id-less list of events past the visible week — the "query" intent's source
+    // for "when's my next X" lookups that fall beyond the 7-day SCHEDULE window.
+    const nextUp = stats.nextUpBlock({ events: c.events, now: c.now });
+    // Follow-up context for the read-only answer card — the device replays recent
+    // turns so "what about swimming?" resolves against the prior answer (stateless).
+    const history = parseHistory(req.body.history);
+    const payload = build.buildInterpret({ now: c.now, text, scheduleText, freeSlots, prefs: c.prefs, statsLine, recentPast, nextUp, history });
     const decision = await callAndParse(callClaude, { system: prompts.interpret, payload },
       (raw) => parsers.parseInterpret(raw, { zone: c.zone, idMap }));
     res.json(decision);

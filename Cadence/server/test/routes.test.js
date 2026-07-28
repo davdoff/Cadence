@@ -6,6 +6,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { createApp } = require("../app");
+const { parseHistory, MAX_HISTORY_TURNS } = require("../lib/dto");
 
 /** Boot the app on an ephemeral port; returns a JSON-speaking client. */
 function boot(fakeClaude) {
@@ -84,6 +85,58 @@ test("POST /v1/schedule/interpret maps token ids back to UUIDs", async () => {
     assert.equal(body.targetEventId, "uuid-gym"); // mapped back
     assert.equal(body.interpretation, "Moving 'Gym' to Tue 08:00–09:00");
   } finally { close(); }
+});
+
+test("POST /v1/schedule/interpret threads CONVERSATION history; USER_REQUEST is the latest", async () => {
+  let seen;
+  const fake = async ({ payload }) => {
+    seen = payload;
+    return JSON.stringify({ intent: "query", interpretation: "Your next swim", payload: { answer: "No swims are scheduled." } });
+  };
+  const { post, close } = boot(fake);
+  try {
+    const history = [
+      { user: "when's my next gym?", assistant: "Your next gym is Tuesday at 08:00." },
+      { user: "", assistant: "dropped — empty user" }, // non-conforming, filtered out
+    ];
+    const { status, body } = await post("/v1/schedule/interpret", { ...BASE_REQ, text: "what about swimming?", history });
+    assert.equal(status, 200);
+    assert.equal(body.intent, "query");
+    // History rendered oldest-first, as USER/YOU, before the schedule:
+    assert.match(seen, /CONVERSATION \(earlier turns/);
+    assert.match(seen, /USER: when's my next gym\?/);
+    assert.match(seen, /YOU: Your next gym is Tuesday at 08:00\./);
+    assert.ok(seen.indexOf("CONVERSATION") < seen.indexOf("SCHEDULE"));
+    // The empty-user turn was dropped, and the latest message is USER_REQUEST:
+    assert.doesNotMatch(seen, /dropped — empty user/);
+    assert.match(seen, /USER_REQUEST: "what about swimming\?"/);
+  } finally { close(); }
+});
+
+test("POST /v1/schedule/interpret without history renders no CONVERSATION block", async () => {
+  let seen;
+  const fake = async ({ payload }) => {
+    seen = payload;
+    return JSON.stringify({ intent: "query", interpretation: "x", payload: { answer: "a" } });
+  };
+  const { post, close } = boot(fake);
+  try {
+    await post("/v1/schedule/interpret", { ...BASE_REQ, text: "when's my next gym?" });
+    assert.doesNotMatch(seen, /CONVERSATION/);
+    // garbage history is ignored, not a 400:
+    const { status } = await post("/v1/schedule/interpret", { ...BASE_REQ, text: "hi", history: "not-an-array" });
+    assert.equal(status, 200);
+    assert.doesNotMatch(seen, /CONVERSATION/);
+  } finally { close(); }
+});
+
+test("parseHistory: filters non-conforming entries and caps to MAX_HISTORY_TURNS", () => {
+  assert.deepEqual(parseHistory("nope"), []);
+  assert.deepEqual(parseHistory([{ user: " ", assistant: "x" }, { user: "x", assistant: "" }]), []);
+  const many = Array.from({ length: MAX_HISTORY_TURNS + 4 }, (_, i) => ({ user: `u${i}`, assistant: `a${i}` }));
+  const out = parseHistory(many);
+  assert.equal(out.length, MAX_HISTORY_TURNS);
+  assert.equal(out[out.length - 1].user, `u${many.length - 1}`); // keeps the most recent
 });
 
 test("POST /v1/schedule/generate returns events; past part of period is clipped", async () => {

@@ -150,6 +150,36 @@ test("interpret: delete maps target ids to real UUIDs; empty ids throw", () => {
   }), { zone: ZONE, idMap }), ParseError);
 });
 
+test("interpret: summarize passes the narrative through; empty summary throws", () => {
+  const out = parsers.parseInterpret(JSON.stringify({
+    intent: "summarize", interpretation: "Your week at a glance",
+    payload: { summary: "You have 11 events this week — mostly Work. Thursday is busiest; Friday afternoon is open." },
+  }), { zone: ZONE, idMap });
+  assert.equal(out.intent, "summarize");
+  assert.match(out.summary, /11 events/);
+
+  assert.throws(() => parsers.parseInterpret(JSON.stringify({
+    intent: "summarize", interpretation: "x", payload: { summary: "" },
+  }), { zone: ZONE, idMap }), ParseError);
+});
+
+test("interpret: query passes the answer through; empty/missing answer throws", () => {
+  const out = parsers.parseInterpret(JSON.stringify({
+    intent: "query", interpretation: "When your next gym is",
+    payload: { answer: "Your next gym is Tuesday at 08:00." },
+  }), { zone: ZONE, idMap });
+  assert.equal(out.intent, "query");
+  assert.match(out.answer, /Tuesday at 08:00/);
+
+  assert.throws(() => parsers.parseInterpret(JSON.stringify({
+    intent: "query", interpretation: "x", payload: { answer: "" },
+  }), { zone: ZONE, idMap }), ParseError);
+
+  assert.throws(() => parsers.parseInterpret(JSON.stringify({
+    intent: "query", interpretation: "x", payload: {},
+  }), { zone: ZONE, idMap }), ParseError);
+});
+
 // ── Meal suggestions ────────────────────────────────────────────────────────
 
 test("meals: resolves DAY HH:MM within the week and clamps to dinner window end", () => {

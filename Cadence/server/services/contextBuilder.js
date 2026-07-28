@@ -70,14 +70,27 @@ DEADLINE: ${ymd(deadline)}
 WEEKLY_HOURS: ${weeklyHours}
 CONSTRAINTS: "${constraints}"`);
 
-const buildInterpret = ({ now, text, scheduleText, freeSlots, prefs }) => {
+const buildInterpret = ({ now, text, scheduleText, freeSlots, prefs, statsLine = "", recentPast = "", nextUp = "", history = [] }) => {
   const categoriesLine =
     prefs.allCategories.length > 0 ? `\nCATEGORIES: [${prefs.allCategories.join(", ")}]` : "";
-  return withNow(now, `SCHEDULE:
+  // STATS + RECENT_PAST feed the read-only "summarize" intent; NEXT_UP feeds the
+  // read-only "query" intent's beyond-the-week lookups (all from stats.js). They
+  // ride on every interpret payload because classification is one-shot.
+  const statsPart = statsLine ? `\n${statsLine}` : "";
+  const recentPart = recentPast ? `\n${recentPast}` : "";
+  const nextUpPart = nextUp ? `\n${nextUp}` : "";
+  // Follow-up thread for the read-only answer card: earlier turns, oldest first,
+  // so the model resolves references against them. USER_REQUEST is still the latest.
+  const conversationPart = history.length > 0
+    ? `CONVERSATION (earlier turns this session, oldest first):\n${history
+        .map((t) => `USER: ${t.user}\nYOU: ${t.assistant}`)
+        .join("\n")}\n`
+    : "";
+  return withNow(now, `${conversationPart}SCHEDULE:
 ${scheduleText}
 FREE_SLOTS: ${slotsLine(freeSlots)}
 USER_REQUEST: "${text}"${categoriesLine}
-PREFS: ${prefsLine(prefs)}`);
+PREFS: ${prefsLine(prefs)}${statsPart}${recentPart}${nextUpPart}`);
 };
 
 const buildGenerate = ({ now, period, goals, freeSlots, prefs }) =>

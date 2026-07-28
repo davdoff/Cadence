@@ -70,10 +70,19 @@ struct AIService {
     }
 
     /// Only what planning needs: today onward, plus anything awaiting rescheduling.
-    static func snapshots(_ events: [Event], now: Date, iso: ISO8601DateFormatter) -> [EventSnapshotDTO] {
-        let startOfToday = Calendar.current.startOfDay(for: now)
+    /// `historyDays > 0` also includes recently-finished events — the interpret
+    /// route uses this so the read-only "summarize" intent can report on the
+    /// past (STATS + RECENT_PAST). Other routes keep the default (forward-only).
+    static func snapshots(
+        _ events: [Event], now: Date, iso: ISO8601DateFormatter, historyDays: Int = 0
+    ) -> [EventSnapshotDTO] {
+        let cal = Calendar.current
+        let startOfToday = cal.startOfDay(for: now)
+        let cutoff = historyDays > 0
+            ? (cal.date(byAdding: .day, value: -historyDays, to: startOfToday) ?? startOfToday)
+            : startOfToday
         return events
-            .filter { $0.endTime >= startOfToday || $0.status == .missed || $0.status == .displaced }
+            .filter { $0.endTime >= cutoff || $0.status == .missed || $0.status == .displaced }
             .map { EventSnapshotDTO(event: $0, iso: iso) }
     }
 

@@ -162,6 +162,12 @@ function parseInterpret(text, { zone, idMap }) {
       if (!Array.isArray(p.events) || p.events.length === 0) fail("generate without events");
       return { intent, interpretation, events: p.events.map((e) => parseEventDraft(e, zone)) };
     }
+    case "summarize":
+      // Read-only: just the model's narrative, grounded server-side in STATS.
+      return { intent, interpretation, summary: str(p.summary, "summary") };
+    case "query":
+      // Read-only: a single factual answer, grounded in the payload's schedule data.
+      return { intent, interpretation, answer: str(p.answer, "answer") };
     case "clarify":
       return {
         intent, interpretation,
