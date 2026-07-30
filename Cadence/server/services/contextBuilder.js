@@ -93,6 +93,14 @@ USER_REQUEST: "${text}"${categoriesLine}
 PREFS: ${prefsLine(prefs)}${statsPart}${recentPart}${nextUpPart}`);
 };
 
+const buildPlanSkeleton = ({ now, goal, goalType, deadline, weeklyHours, weeksAvailable, constraints }) =>
+  withNow(now, `GOAL: "${goal}"
+TYPE: ${goalType}
+DEADLINE: ${deadline ? ymd(deadline) : "none"}
+WEEKLY_HOURS: ${weeklyHours}
+WEEKS_AVAILABLE: ${weeksAvailable}
+CONSTRAINTS: "${constraints}"`);
+
 const buildGenerate = ({ now, period, goals, freeSlots, prefs }) =>
   withNow(now, `PERIOD: ${ymd(period.start)} to ${ymd(period.end)}
 GOALS: "${goals}"
@@ -101,5 +109,5 @@ PREFS: ${prefsLine(prefs)}`);
 
 module.exports = {
   buildAdd, buildMove, buildReschedule, buildMealSuggestion,
-  buildHabits, buildProjectPlan, buildInterpret, buildGenerate,
+  buildHabits, buildProjectPlan, buildInterpret, buildGenerate, buildPlanSkeleton,
 };

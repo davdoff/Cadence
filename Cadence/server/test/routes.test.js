@@ -247,6 +247,102 @@ test("POST /v1/meal/suggestions defaults to today only (days=1)", async () => {
   } finally { close(); }
 });
 
+test("POST /v1/plan/skeleton returns plan + cushion; prompt carries deadline/weeks, call uses Opus+thinking", async () => {
+  let seen;
+  const fake = async (opts) => {
+    seen = opts;
+    return JSON.stringify({
+      title: "Signals & Systems exam prep",
+      workUnits: [
+        { id: "W1", title: "Ch.1–3 first pass", objective: "Summarise ch.1–3; solve the worked examples", estimatedMinutes: 240, archetype: "repetition", constraints: { afterUnit: null, repeatOf: null, minGapDays: null, notLastNDaysBeforeDeadline: 3 } },
+        { id: "W2", title: "Ch.1–3 recall", objective: "Redo worked examples ch.1–3 without notes; verify", estimatedMinutes: 120, archetype: "repetition", constraints: { afterUnit: null, repeatOf: "W1", minGapDays: 3, notLastNDaysBeforeDeadline: null } },
+      ],
+    });
+  };
+  const { post, close } = boot(fake);
+  try {
+    const { status, body } = await post("/v1/plan/skeleton", {
+      now: BASE_REQ.now, timezone: BASE_REQ.timezone,
+      goal: "Pass the Signals & Systems exam", goalType: "study",
+      deadline: "2026-08-05", weeklyHours: 10,
+    });
+    assert.equal(status, 200);
+    assert.equal(body.plan.title, "Signals & Systems exam prep");
+    assert.equal(body.plan.goalType, "study");
+    assert.equal(body.plan.deadline, "2026-08-05");
+    assert.equal(body.plan.workUnits.length, 2);
+    assert.equal(body.plan.workUnits[1].constraints.repeatOf, "W1");
+    // Cushion: needed = 240 + 120 = 360; weeks from 2026-07-06 → 2026-08-05 (end
+    // of day) is ceil(30.6/7) = 5; available = 10h × 60 × 5 = 3000.
+    assert.equal(body.capacity.neededMinutes, 360);
+    assert.equal(body.capacity.availableMinutes, 3000);
+    assert.equal(body.capacity.cushionMinutes, 2640);
+    // The deep planner uses Opus + adaptive thinking + high effort, and the
+    // prompt gives the model the deadline and the weeks it must budget across.
+    assert.equal(seen.model, "claude-opus-4-8");
+    assert.equal(seen.thinking, true);
+    assert.equal(seen.effort, "high");
+    assert.match(seen.payload, /DEADLINE: 2026-08-05/);
+    assert.match(seen.payload, /WEEKLY_HOURS: 10/);
+    assert.match(seen.payload, /WEEKS_AVAILABLE: 5/);
+    assert.match(seen.system, /deep planning assistant/);
+  } finally { close(); }
+});
+
+test("POST /v1/plan/skeleton without a deadline uses the default horizon", async () => {
+  let seen;
+  const fake = async (opts) => {
+    seen = opts;
+    return JSON.stringify({
+      title: "Learn Spanish",
+      workUnits: [{ id: "W1", title: "A1 basics", objective: "Hold a 5-line self-intro from memory", estimatedMinutes: 600, archetype: "repetition", constraints: { afterUnit: null, repeatOf: null, minGapDays: null, notLastNDaysBeforeDeadline: null } }],
+    });
+  };
+  const { post, close } = boot(fake);
+  try {
+    const { status, body } = await post("/v1/plan/skeleton", {
+      now: BASE_REQ.now, timezone: BASE_REQ.timezone, goal: "Learn Spanish", goalType: "project", weeklyHours: 3,
+    });
+    assert.equal(status, 200);
+    assert.equal(body.plan.deadline, null);
+    assert.match(seen.payload, /DEADLINE: none/);
+    assert.match(seen.payload, /WEEKS_AVAILABLE: 8/);      // default horizon
+    assert.equal(body.capacity.availableMinutes, 1440);   // 3h × 60 × 8
+    assert.equal(body.capacity.cushionMinutes, 840);      // 1440 − 600
+  } finally { close(); }
+});
+
+test("POST /v1/plan/skeleton rejects a past deadline and missing goal", async () => {
+  const { post, close } = boot(async () => "{}");
+  try {
+    const past = await post("/v1/plan/skeleton", {
+      now: BASE_REQ.now, timezone: BASE_REQ.timezone, goal: "x", deadline: "2026-07-01", weeklyHours: 5,
+    });
+    assert.equal(past.status, 400);
+    assert.equal(past.body.error.code, "BAD_REQUEST");
+
+    const noGoal = await post("/v1/plan/skeleton", { now: BASE_REQ.now, timezone: BASE_REQ.timezone, weeklyHours: 5 });
+    assert.equal(noGoal.status, 400);
+  } finally { close(); }
+});
+
+test("POST /v1/plan/skeleton: an invalid archetype twice → 502 AI_UNPARSEABLE", async () => {
+  let calls = 0;
+  const fake = async () => {
+    calls++;
+    return JSON.stringify({ title: "x", workUnits: [{ id: "W1", title: "t", objective: "o", estimatedMinutes: 60, archetype: "bogus", constraints: {} }] });
+  };
+  const { post, close } = boot(fake);
+  try {
+    const { status, body } = await post("/v1/plan/skeleton", {
+      now: BASE_REQ.now, timezone: BASE_REQ.timezone, goal: "x", deadline: "2026-08-05", weeklyHours: 5,
+    });
+    assert.equal(status, 502);
+    assert.equal(body.error.code, "AI_UNPARSEABLE");
+    assert.equal(calls, 2); // retry-once fired
+  } finally { close(); }
+});
+
 test("POST /v1/habits/analysis returns trimmed plain-text insight", async () => {
   const fake = async ({ payload }) => {
     assert.match(payload, /HABITS_WEEK: Reading=5\(↑ from 3\)/);

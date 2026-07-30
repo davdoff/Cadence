@@ -599,14 +599,9 @@ struct AIInputView: View {
     // MARK: - Loading / hint / error
 
     private var loadingView: some View {
-        VStack(spacing: 12) {
-            ProgressView().tint(theme.accent).scaleEffect(1.4)
-            Text("Thinking…")
-                .font(.subheadline)
-                .foregroundColor(theme.text2)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(32)
+        AILoadingIndicator()
+            .frame(maxWidth: .infinity)
+            .padding(32)
     }
 
     private var hintView: some View {
@@ -814,6 +809,52 @@ struct AIInputView: View {
         let sf = DateFormatter(); sf.dateFormat = "EEE d MMM, h:mm a"
         let ef = DateFormatter(); ef.dateFormat = "h:mm a"
         return "\(sf.string(from: start)) – \(ef.string(from: end))"
+    }
+}
+
+// MARK: - Loading indicator
+
+/// On-brand "Thinking…" state: a themed bar that sweeps quickly to ~90% and
+/// holds, over a Cadence "C" that spins while its arc grows and shrinks — so it
+/// reads as the C being drawn, then flowing into the next spin. The bar stays at
+/// 90% because the answer's arrival swaps this whole view out for the result card.
+private struct AILoadingIndicator: View {
+    @Environment(\.theme) private var theme
+    @State private var progress: CGFloat = 0
+    @State private var rotation: Double = 0
+    @State private var trimEnd: CGFloat = 0.2
+
+    var body: some View {
+        VStack(spacing: 18) {
+            // Themed progress bar, filling fast to 90% then holding.
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(theme.track)
+                    Capsule()
+                        .fill(theme.barGradient)
+                        .frame(width: geo.size.width * progress)
+                }
+            }
+            .frame(height: 6)
+            .frame(maxWidth: 220)
+
+            // The Cadence "C": a rotating arc whose length pulses, so it looks
+            // like the C is being built and then flows into the next load.
+            Circle()
+                .trim(from: 0, to: trimEnd)
+                .stroke(theme.barGradient, style: StrokeStyle(lineWidth: 3.5, lineCap: .round))
+                .frame(width: 26, height: 26)
+                .rotationEffect(.degrees(rotation))
+
+            Text("Thinking…")
+                .font(.subheadline)
+                .foregroundColor(theme.text2)
+        }
+        .onAppear {
+            withAnimation(.easeOut(duration: 0.75)) { progress = 0.9 }
+            withAnimation(.linear(duration: 1).repeatForever(autoreverses: false)) { rotation = 360 }
+            withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) { trimEnd = 0.9 }
+        }
     }
 }
 

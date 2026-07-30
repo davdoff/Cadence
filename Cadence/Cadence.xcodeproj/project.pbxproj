@@ -78,6 +78,7 @@
 				Models/EventSeries.swift,
 				Models/Habit.swift,
 				Models/Meal.swift,
+				Models/ProjectPlan.swift,
 				Models/Shared/AppGroup.swift,
 				Models/Shared/EventActivityAttributes.swift,
 				Models/Shared/SharedModelContainer.swift,

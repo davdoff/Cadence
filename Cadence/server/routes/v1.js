@@ -13,10 +13,10 @@
  */
 
 const express = require("express");
-const { callAndParse } = require("../lib/claude");
+const { callAndParse, OPUS } = require("../lib/claude");
 const { parseBase, parsePrefs, parseEvent, parseEventList, requireString, parseHistory } = require("../lib/dto");
 const { badRequest } = require("../lib/errors");
-const { parseISO } = require("../lib/time");
+const { parseISO, ymd } = require("../lib/time");
 const scheduler = require("../services/scheduler");
 const build = require("../services/contextBuilder");
 const parsers = require("../services/parsers");
@@ -207,6 +207,51 @@ function createV1Router({ callClaude, fetchImpl = globalThis.fetch }) {
     const result = await callAndParse(callClaude, { system: prompts.projectPlan, payload },
       (text) => parsers.parseProjectPlan(text));
     res.json(result);
+  }));
+
+  // ── Deep planner — thin whole-horizon skeleton + cushion ─────────────────
+  // deep-planner-plan.md §3, §6. Opus + adaptive thinking + high effort: the one
+  // place plan quality compounds (accuracy over cost). One-shot intake for now;
+  // the multiturn clarify conversation replaces this entry point in increment 3.
+
+  router.post("/plan/skeleton", wrap(async (req, res) => {
+    const { now, zone } = parseBase(req.body);
+    const goal = requireString(req.body, "goal");
+    const goalType = req.body.goalType === "project" ? "project" : "study";
+    const weeklyHours = Number.isInteger(req.body.weeklyHours) && req.body.weeklyHours > 0 ? req.body.weeklyHours : 6;
+    const constraints = typeof req.body.constraints === "string" ? req.body.constraints : "";
+    const hasDeadline = typeof req.body.deadline === "string" && req.body.deadline.length > 0;
+    const deadline = hasDeadline ? parseISO(req.body.deadline, zone, "deadline") : null;
+    if (deadline && deadline.endOf("day") <= now) throw badRequest('"deadline" is in the past');
+
+    // Committed capacity = weeklyHours × weeks until the deadline (or a default
+    // horizon when the goal is open-ended). This is the honest "time you HAVE"
+    // for cushion math; whether those hours physically fit the calendar is the
+    // weekly-placement route's job, not the skeleton's.
+    const DEFAULT_HORIZON_WEEKS = 8;
+    const weeksAvailable = deadline
+      ? Math.max(1, Math.ceil(deadline.endOf("day").diff(now, "days").days / 7))
+      : DEFAULT_HORIZON_WEEKS;
+
+    const payload = build.buildPlanSkeleton({ now, goal, goalType, deadline, weeklyHours, weeksAvailable, constraints });
+    const skeleton = await callAndParse(
+      callClaude,
+      { system: prompts.planSkeleton, payload, model: OPUS, maxTokens: 8000, thinking: true, effort: "high" },
+      (text) => parsers.parsePlanSkeleton(text)
+    );
+
+    const neededMinutes = skeleton.workUnits.reduce((acc, u) => acc + u.estimatedMinutes, 0);
+    const availableMinutes = weeklyHours * 60 * weeksAvailable;
+
+    res.json({
+      plan: {
+        title: skeleton.title,
+        goalType,
+        deadline: deadline ? ymd(deadline) : null,
+        workUnits: skeleton.workUnits,
+      },
+      capacity: { neededMinutes, availableMinutes, cushionMinutes: availableMinutes - neededMinutes },
+    });
   }));
 
   return router;

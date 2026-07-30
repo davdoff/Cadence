@@ -49,7 +49,7 @@ struct ContentView: View {
                 tabScreen(.today)    { TodayView() }
                 tabScreen(.schedule) { ScheduleView() }
                 tabScreen(.habits)   { HabitsView() }
-                tabScreen(.overview) { OverviewView() }
+                tabScreen(.overview) { OverviewTabView() }
                 tabScreen(.settings) { SettingsView() }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -160,7 +160,7 @@ struct ContentView: View {
 #Preview {
     ContentView()
         .modelContainer(
-            for: [Event.self, Category.self, Meal.self, UserPreferences.self, Habit.self],
+            for: [Event.self, Category.self, Meal.self, UserPreferences.self, Habit.self, ProjectPlan.self, WorkUnit.self],
             inMemory: true
         )
 }

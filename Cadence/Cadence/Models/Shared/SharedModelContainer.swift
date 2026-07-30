@@ -14,7 +14,9 @@ enum SharedModelContainer {
         Meal.self,
         UserPreferences.self,
         Habit.self,
-        CalendarImportSource.self
+        CalendarImportSource.self,
+        ProjectPlan.self,
+        WorkUnit.self
     ])
 
     /// The one container instance for the app process. Shared so the UI's

@@ -21,6 +21,34 @@ struct ProjectPhaseData {
     var targetDate: Date?
 }
 
+// Deep planner (deep-planner-plan.md §3). Plain value types the view maps onto
+// SwiftData `ProjectPlan`/`WorkUnit` — AIService never touches the context.
+struct PlanSkeletonResult {
+    var title: String
+    var goalType: String          // "study" | "project"
+    var deadline: Date?
+    var workUnits: [WorkUnitData]
+    var capacity: PlanCapacity
+}
+
+struct WorkUnitData {
+    var id: String                // the skeleton's "W1" token
+    var title: String
+    var objective: String
+    var estimatedMinutes: Int
+    var archetype: String         // "milestone" | "repetition"
+    var afterUnit: String?
+    var repeatOf: String?
+    var minGapDays: Int?
+    var notLastNDaysBeforeDeadline: Int?
+}
+
+struct PlanCapacity {
+    var neededMinutes: Int
+    var availableMinutes: Int
+    var cushionMinutes: Int
+}
+
 enum AIServiceError: LocalizedError {
     case invalidResponse
     case apiError(statusCode: Int)
@@ -362,5 +390,83 @@ extension AIService {
                 targetDate: phase.targetDate.flatMap { dayFmt.date(from: $0) }
             )
         }
+    }
+}
+
+// MARK: - Deep Planner Skeleton (/v1/plan/skeleton)
+
+extension AIService {
+    /// One-shot intake → thin whole-horizon plan + cushion. The multiturn clarify
+    /// conversation replaces this entry point in increment 3 (deep-planner-plan.md §7).
+    func planSkeleton(
+        goal: String,
+        goalType: String,
+        deadline: Date?,
+        weeklyHours: Int,
+        constraints: String
+    ) async throws -> PlanSkeletonResult {
+        struct Request: Encodable {
+            let now: String; let timezone: String
+            let goal: String; let goalType: String
+            let deadline: String?; let weeklyHours: Int; let constraints: String
+        }
+        struct Response: Decodable {
+            struct Unit: Decodable {
+                struct Constraints: Decodable {
+                    let afterUnit: String?; let repeatOf: String?
+                    let minGapDays: Int?; let notLastNDaysBeforeDeadline: Int?
+                }
+                let id: String; let title: String; let objective: String
+                let estimatedMinutes: Int; let archetype: String
+                let constraints: Constraints
+            }
+            struct Plan: Decodable {
+                let title: String; let goalType: String
+                let deadline: String?; let workUnits: [Unit]
+            }
+            struct Capacity: Decodable {
+                let neededMinutes: Int; let availableMinutes: Int; let cushionMinutes: Int
+            }
+            let plan: Plan; let capacity: Capacity
+        }
+
+        let iso = Self.deviceISOFormatter()
+        let dayFmt = DateFormatter()
+        dayFmt.dateFormat = "yyyy-MM-dd"
+        dayFmt.locale = Locale(identifier: "en_US_POSIX")
+
+        let body = try JSONEncoder().encode(Request(
+            now: iso.string(from: .now),
+            timezone: TimeZone.current.identifier,
+            goal: goal,
+            goalType: goalType,
+            deadline: deadline.map { dayFmt.string(from: $0) },
+            weeklyHours: weeklyHours,
+            constraints: constraints
+        ))
+        let data = try await exchange(route: "/v1/plan/skeleton", body: body)
+        guard let r = try? JSONDecoder().decode(Response.self, from: data) else {
+            throw AIServiceError.invalidResponse
+        }
+
+        return PlanSkeletonResult(
+            title: r.plan.title,
+            goalType: r.plan.goalType,
+            deadline: r.plan.deadline.flatMap { dayFmt.date(from: $0) },
+            workUnits: r.plan.workUnits.map {
+                WorkUnitData(
+                    id: $0.id, title: $0.title, objective: $0.objective,
+                    estimatedMinutes: $0.estimatedMinutes, archetype: $0.archetype,
+                    afterUnit: $0.constraints.afterUnit, repeatOf: $0.constraints.repeatOf,
+                    minGapDays: $0.constraints.minGapDays,
+                    notLastNDaysBeforeDeadline: $0.constraints.notLastNDaysBeforeDeadline
+                )
+            },
+            capacity: PlanCapacity(
+                neededMinutes: r.capacity.neededMinutes,
+                availableMinutes: r.capacity.availableMinutes,
+                cushionMinutes: r.capacity.cushionMinutes
+            )
+        )
     }
 }

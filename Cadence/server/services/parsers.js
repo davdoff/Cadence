@@ -249,4 +249,40 @@ function parseProjectPlan(text) {
   };
 }
 
-module.exports = { parseDecision, parseInterpret, parseGenerate, parseMealSuggestions, parseProjectPlan };
+// MARK: Plan skeleton — /v1/plan/skeleton (deep-planner-plan.md §3, §6)
+// The thin whole-horizon frame: work units with objectives, hour estimates, and
+// ordering/spacing constraints. Two archetypes: milestone | repetition.
+
+const PLAN_ARCHETYPES = new Set(["milestone", "repetition"]);
+const intOrNull = (v) => (Number.isInteger(v) ? v : null);
+const idOrNull = (v) => (typeof v === "string" && v.length > 0 ? v : null);
+
+function parsePlanSkeleton(text) {
+  const raw = parseJSON(text);
+  if (!Array.isArray(raw.workUnits) || raw.workUnits.length === 0) fail("skeleton response without workUnits");
+  return {
+    title: str(raw.title, "title"),
+    workUnits: raw.workUnits.map((u, i) => {
+      if (!PLAN_ARCHETYPES.has(u?.archetype)) fail(`workUnits[${i}].archetype must be "milestone" or "repetition"`);
+      if (!Number.isInteger(u?.estimatedMinutes) || u.estimatedMinutes <= 0) {
+        fail(`workUnits[${i}].estimatedMinutes must be a positive integer`);
+      }
+      const c = u?.constraints ?? {};
+      return {
+        id: str(u?.id, `workUnits[${i}].id`),
+        title: str(u?.title, `workUnits[${i}].title`),
+        objective: str(u?.objective, `workUnits[${i}].objective`),
+        estimatedMinutes: u.estimatedMinutes,
+        archetype: u.archetype,
+        constraints: {
+          afterUnit: idOrNull(c.afterUnit),
+          repeatOf: idOrNull(c.repeatOf),
+          minGapDays: intOrNull(c.minGapDays),
+          notLastNDaysBeforeDeadline: intOrNull(c.notLastNDaysBeforeDeadline),
+        },
+      };
+    }),
+  };
+}
+
+module.exports = { parseDecision, parseInterpret, parseGenerate, parseMealSuggestions, parseProjectPlan, parsePlanSkeleton };

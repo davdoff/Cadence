@@ -540,6 +540,13 @@ struct MealSchedulerService {
 #### Post-Release: Conversational Intake (Planned)
 After v1, add an optional **multi-turn intake flow** where Claude asks the user clarifying questions before generating the plan. This is more flexible for complex or ambiguous goals but requires managing conversation state and multiple API calls — defer to post-release.
 
+#### Deep Planner v2 (in progress — `deep-planner-plan.md`)
+The planner is being rebuilt around a **rolling week-by-week loop** rather than a one-shot phased breakdown. The design: a thin **whole-horizon skeleton** (milestones + workload budget + deadline anchor + spacing intent, *no clock times*) generated once, then **detailed session planning one week at a time** against it, advancing on completion + feedback. The planning brain runs on `claude-opus-4-8` + adaptive thinking (accuracy over cost).
+
+- **Lives in the Overview tab**, split via a top segmented control `Planner | Stats` (`OverviewTabView`); the planner is primary.
+- **Increment 1 (done):** `POST /v1/plan/skeleton` (server) + one-shot intake form (`DeepPlanIntakeView`) → skeleton persisted as SwiftData **`ProjectPlan` / `WorkUnit`** models, rendered with a **cushion** badge (committed hours vs. estimated work) and the ordered work units (`DeepPlannerView`). Two work-unit archetypes: `milestone` (complete once, in order) and `repetition` (revisit at growing gaps — spaced retrieval).
+- **Next:** weekly placement (`/v1/plan/week`, reusing the shared expander), a progress/review card, then multiturn clarify intake (`/v1/plan/intake`) + rebudget.
+
 ---
 
 ## AI Request Architecture — /v1 Planning API (Implemented)
@@ -587,7 +594,8 @@ The server is **stateless and OS-blind**: every request carries `now` +
 | `POST /v1/schedule/generate` | Fill a period with events for stated goals (uses the shared expander) |
 | `POST /v1/meal/suggestions` | New-meal options fitted to dinner slots (returns `[]` without an AI call when no slots exist) |
 | `POST /v1/habits/analysis` | Weekly habit insight (plain text) |
-| `POST /v1/project/plan` | Deep project phase breakdown |
+| `POST /v1/project/plan` | Deep project phase breakdown (legacy phase model) |
+| `POST /v1/plan/skeleton` | **Deep planner** — thin whole-horizon skeleton (work units + objectives + hour estimates + spacing constraints) with cushion math. Runs on `claude-opus-4-8` + adaptive thinking + `effort:"high"` (quality over cost), unlike the Sonnet secretary routes. Spec: `deep-planner-plan.md` |
 | `POST /v1/calendar/ics` | **Deterministic — no Claude call.** Fetches an `.ics` feed URL (`webcal://` normalised) and expands it (RRULE/EXDATE/RDATE/RECURRENCE-ID, UTC/TZID/floating/all-day forms) into concrete event DTOs within a ≤ 90-day window. Stateless: the URL is re-sent on every sync, never stored or logged (secret feed URLs carry auth). Spec: `calendar-import.md` §4 |
 
 The old `/api/*` passthrough routes stay mounted (only when an API key is

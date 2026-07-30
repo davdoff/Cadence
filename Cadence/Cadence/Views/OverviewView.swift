@@ -130,37 +130,33 @@ struct OverviewView: View {
 
     // MARK: - Body
 
+    // Bare content: the enclosing `OverviewTabView` owns the background, the
+    // Planner|Stats segmented control, and the navigation title.
     var body: some View {
-        ZStack {
-            theme.backgroundGradient.ignoresSafeArea()
-            ScrollView {
-                VStack(spacing: 20) {
-                    periodPicker
-                    completionRingCard
-                    statsRow
-                    if total > 0 {
-                        activityChartCard
-                    }
-                    if !categoryStats.isEmpty {
-                        categoryCard
-                    }
-                    if !mealEvents.isEmpty {
-                        mealsCard
-                    }
-                    if !habits.isEmpty {
-                        habitsCard
-                    }
-                    if total == 0 && habits.isEmpty {
-                        emptyState
-                    }
+        ScrollView {
+            VStack(spacing: 20) {
+                periodPicker
+                completionRingCard
+                statsRow
+                if total > 0 {
+                    activityChartCard
                 }
-                .padding()
-                .padding(.bottom, 20)
+                if !categoryStats.isEmpty {
+                    categoryCard
+                }
+                if !mealEvents.isEmpty {
+                    mealsCard
+                }
+                if !habits.isEmpty {
+                    habitsCard
+                }
+                if total == 0 && habits.isEmpty {
+                    emptyState
+                }
             }
+            .padding()
+            .padding(.bottom, 20)
         }
-        .navigationTitle("Overview")
-        .navigationBarTitleDisplayMode(.large)
-        .toolbarBackground(theme.background, for: .navigationBar)
     }
 
     // MARK: - Period picker
