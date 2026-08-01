@@ -13,6 +13,10 @@ struct DeepPlanIntakeView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var context
 
+    /// Called with the new plan's id once it's persisted, so the planner can make
+    /// it the active plan.
+    var onCreated: ((UUID) -> Void)? = nil
+
     enum GoalType: String, CaseIterable, Identifiable {
         case study = "Study", project = "Project"
         var id: String { rawValue }
@@ -20,6 +24,7 @@ struct DeepPlanIntakeView: View {
     }
 
     @State private var goal = ""
+    @State private var detail = ""
     @State private var goalType: GoalType = .study
     @State private var hasDeadline = true
     @State private var deadline = Calendar.current.date(byAdding: .day, value: 14, to: .now) ?? .now
@@ -39,6 +44,12 @@ struct DeepPlanIntakeView: View {
                 Form {
                     Section("What's the goal?") {
                         TextField("e.g. Pass the Signals & Systems exam", text: $goal, axis: .vertical)
+                            .lineLimit(2...5)
+                    }
+
+                    Section("Anything else? (optional)") {
+                        TextField("Chapters 3–7 only · focus on past papers · no early mornings",
+                                  text: $detail, axis: .vertical)
                             .lineLimit(2...5)
                     }
 
@@ -104,6 +115,7 @@ struct DeepPlanIntakeView: View {
         errorMessage = nil
         isGenerating = true
         let trimmedGoal = goal.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedDetail = detail.trimmingCharacters(in: .whitespacesAndNewlines)
         let due = hasDeadline ? deadline : nil
 
         Task {
@@ -113,9 +125,9 @@ struct DeepPlanIntakeView: View {
                     goalType: goalType.wire,
                     deadline: due,
                     weeklyHours: weeklyHours,
-                    constraints: ""
+                    constraints: trimmedDetail
                 )
-                persist(result)
+                persist(result, detail: trimmedDetail)
                 dismiss()
             } catch {
                 errorMessage = (error as? AIServiceError)?.errorDescription
@@ -127,12 +139,13 @@ struct DeepPlanIntakeView: View {
 
     /// Map the server's plain result onto SwiftData. The view owns persistence;
     /// AIService stays detached (CLAUDE.md rule 3).
-    private func persist(_ result: PlanSkeletonResult) {
+    private func persist(_ result: PlanSkeletonResult, detail: String) {
         let plan = ProjectPlan(
             title: result.title,
             goalType: result.goalType == "project" ? .project : .study,
             deadline: result.deadline,
             weeklyHours: weeklyHours,
+            detail: detail,
             neededMinutes: result.capacity.neededMinutes,
             availableMinutes: result.capacity.availableMinutes
         )
@@ -154,5 +167,6 @@ struct DeepPlanIntakeView: View {
             context.insert(workUnit)
         }
         try? context.save()
+        onCreated?(plan.id)
     }
 }

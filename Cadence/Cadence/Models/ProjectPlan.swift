@@ -28,6 +28,7 @@ final class ProjectPlan {
     var deadline: Date?          // nil for open-ended goals
     var createdAt: Date
     var weeklyHours: Int = 6     // committed hours/week — the weekly budget (inline default for migration)
+    var detail: String = ""      // extra context/constraints from intake (scope, materials, timing) — inline default for migration
     // Cushion snapshot from the last skeleton/rebudget, in minutes.
     var neededMinutes: Int
     var availableMinutes: Int
@@ -40,6 +41,7 @@ final class ProjectPlan {
         goalType: PlanGoalType,
         deadline: Date?,
         weeklyHours: Int,
+        detail: String = "",
         neededMinutes: Int,
         availableMinutes: Int
     ) {
@@ -49,6 +51,7 @@ final class ProjectPlan {
         self.deadline = deadline
         self.createdAt = .now
         self.weeklyHours = weeklyHours
+        self.detail = detail
         self.neededMinutes = neededMinutes
         self.availableMinutes = availableMinutes
         self.workUnits = []

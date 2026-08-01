@@ -203,6 +203,7 @@ Always respond with exactly this JSON and nothing else:
 }
 
 Rules:
+- If CONSTRAINTS is non-empty, treat it as authoritative extra context — scope limits, materials to focus on, or timing preferences — and shape the work units to respect it.
 - 4–12 work units. Keep it thin: milestones + workload budget + spacing intent, not a full schedule.
 - ids are "W1".."Wn"; afterUnit and repeatOf reference those ids.
 - afterUnit: this unit can only start once that unit is done (ordering/dependency).

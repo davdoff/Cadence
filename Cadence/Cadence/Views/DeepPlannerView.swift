@@ -16,12 +16,18 @@ struct DeepPlannerView: View {
     @Query private var prefsResults: [UserPreferences]
     @Query private var categories: [Category]
 
+    @AppStorage("activePlanID") private var activePlanIDString = ""
+
     @State private var showIntake = false
     @State private var isPlanning = false
     @State private var planError: String?
     @State private var lastPlannedCount: Int?
 
-    private var activePlan: ProjectPlan? { plans.first }
+    /// The selected plan, or the newest when the stored id is missing (fresh
+    /// install, or right after deleting the active plan).
+    private var activePlan: ProjectPlan? {
+        plans.first { $0.id.uuidString == activePlanIDString } ?? plans.first
+    }
 
     var body: some View {
         ScrollView {
@@ -41,7 +47,10 @@ struct DeepPlannerView: View {
                     Menu {
                         Button { showIntake = true } label: { Label("New plan", systemImage: "plus") }
                         if let plan = activePlan {
-                            Button(role: .destructive) { context.delete(plan) } label: {
+                            Button(role: .destructive) {
+                                context.delete(plan)
+                                activePlanIDString = ""
+                            } label: {
                                 Label("Delete plan", systemImage: "trash")
                             }
                         }
@@ -52,7 +61,9 @@ struct DeepPlannerView: View {
             }
         }
         .sheet(isPresented: $showIntake) {
-            DeepPlanIntakeView()
+            DeepPlanIntakeView { newID in
+                activePlanIDString = newID.uuidString
+            }
         }
     }
 
@@ -62,9 +73,7 @@ struct DeepPlannerView: View {
     private func planView(_ plan: ProjectPlan) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             VStack(alignment: .leading, spacing: 6) {
-                Text(plan.title)
-                    .font(.title3.weight(.semibold))
-                    .foregroundColor(theme.text)
+                planTitleHeader(plan)
                 HStack(spacing: 6) {
                     Text(plan.goalType == .study ? "Study" : "Project")
                     if let deadline = plan.deadline {
@@ -86,6 +95,38 @@ struct DeepPlannerView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
         .cardStyle()
+    }
+
+    /// Plan title as a switcher: tap to pick among stored plans. The chevron
+    /// only appears when there's more than one plan to switch to.
+    @ViewBuilder
+    private func planTitleHeader(_ plan: ProjectPlan) -> some View {
+        Menu {
+            ForEach(plans) { p in
+                Button {
+                    activePlanIDString = p.id.uuidString
+                } label: {
+                    if p.id == plan.id {
+                        Label(p.title, systemImage: "checkmark")
+                    } else {
+                        Text(p.title)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Text(plan.title)
+                    .font(.title3.weight(.semibold))
+                    .foregroundColor(theme.text)
+                    .multilineTextAlignment(.leading)
+                if plans.count > 1 {
+                    Image(systemName: "chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(theme.text2)
+                }
+            }
+        }
+        .disabled(plans.count <= 1)
     }
 
     private func planWeekButton(_ plan: ProjectPlan) -> some View {
