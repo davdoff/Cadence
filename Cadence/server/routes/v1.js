@@ -22,6 +22,7 @@ const build = require("../services/contextBuilder");
 const parsers = require("../services/parsers");
 const stats = require("../services/stats");
 const { expandGoalsToEvents } = require("../services/expander");
+const { planWeek } = require("../services/weeklyPlanner");
 const ics = require("../services/ics");
 const prompts = require("../prompts");
 
@@ -252,6 +253,72 @@ function createV1Router({ callClaude, fetchImpl = globalThis.fetch }) {
       },
       capacity: { neededMinutes, availableMinutes, cushionMinutes: availableMinutes - neededMinutes },
     });
+  }));
+
+  // ── Deep planner — deterministic weekly placement (NO Claude call) ────────
+  // deep-planner-plan.md §3. Picks the work units due in the window (walking
+  // afterUnit / minGapDays / notLastNDaysBeforeDeadline) and packs them into
+  // free slots. Pure constraint satisfaction — the skeleton already did the
+  // fuzzy→structured translation, so no model is needed here.
+
+  router.post("/plan/week", wrap(async (req, res) => {
+    const c = ctx(req.body); // { now, zone, prefs, events }
+    const weeklyHours = Number.isInteger(req.body.weeklyHours) && req.body.weeklyHours > 0 ? req.body.weeklyHours : 6;
+
+    const planBody = req.body.plan;
+    if (typeof planBody !== "object" || planBody === null) throw badRequest('Missing "plan"');
+    const goalType = planBody.goalType === "project" ? "project" : "study";
+    const deadline = typeof planBody.deadline === "string" && planBody.deadline
+      ? parseISO(planBody.deadline, c.zone, "plan.deadline") : null;
+    if (!Array.isArray(planBody.workUnits) || planBody.workUnits.length === 0) throw badRequest('"plan.workUnits" is required');
+    const workUnits = planBody.workUnits.map((u, i) => {
+      if (typeof u?.id !== "string" || typeof u?.title !== "string" || typeof u?.objective !== "string") {
+        throw badRequest(`"plan.workUnits[${i}]" needs id, title, objective`);
+      }
+      if (!Number.isInteger(u.estimatedMinutes) || u.estimatedMinutes <= 0) {
+        throw badRequest(`"plan.workUnits[${i}].estimatedMinutes" must be a positive integer`);
+      }
+      const cs = u.constraints ?? {};
+      return {
+        id: u.id, title: u.title, objective: u.objective,
+        estimatedMinutes: u.estimatedMinutes,
+        archetype: u.archetype === "repetition" ? "repetition" : "milestone",
+        constraints: {
+          afterUnit: typeof cs.afterUnit === "string" ? cs.afterUnit : null,
+          repeatOf: typeof cs.repeatOf === "string" ? cs.repeatOf : null,
+          minGapDays: Number.isInteger(cs.minGapDays) ? cs.minGapDays : null,
+          notLastNDaysBeforeDeadline: Number.isInteger(cs.notLastNDaysBeforeDeadline) ? cs.notLastNDaysBeforeDeadline : null,
+        },
+      };
+    });
+
+    if (typeof req.body.window !== "object" || req.body.window === null) throw badRequest('Missing "window"');
+    const windowEnd = parseISO(req.body.window.end, c.zone, "window.end");
+    let windowStart = parseISO(req.body.window.start, c.zone, "window.start");
+    if (windowStart < c.now) windowStart = c.now;           // never place in the past
+    if (windowEnd <= windowStart) throw badRequest('"window" is empty or entirely in the past');
+
+    const progress = Array.isArray(req.body.progress)
+      ? req.body.progress.flatMap((p, i) => {
+          if (typeof p?.workUnitId !== "string") throw badRequest(`"progress[${i}].workUnitId" is required`);
+          return [{
+            workUnitId: p.workUnitId,
+            scheduledMinutes: Number.isInteger(p.scheduledMinutes) ? p.scheduledMinutes : 0,
+            lastSessionDate: typeof p.lastSessionDate === "string" && p.lastSessionDate
+              ? parseISO(p.lastSessionDate, c.zone, `progress[${i}].lastSessionDate`) : null,
+          }];
+        })
+      : [];
+
+    const freeSlots = scheduler.freeSlots({
+      durationMinutes: 30, windowStart, windowEnd, events: c.events, prefs: c.prefs,
+    });
+
+    res.json(planWeek({
+      plan: { goalType, deadline, workUnits },
+      window: { start: windowStart, end: windowEnd },
+      progress, weeklyHours, freeSlots, prefs: c.prefs,
+    }));
   }));
 
   return router;

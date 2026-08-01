@@ -32,6 +32,15 @@ final class Event {
     // for lightweight migration.
     var locallyEditedTime: Bool = false
 
+    // Deep planner links (deep-planner-plan.md §5). Set on sessions the weekly
+    // planner places: planId → the owning ProjectPlan.id; workUnitId → the
+    // skeleton unit's key ("W1"); objective → the concrete goal to surface in
+    // the event detail / Live Activity. Defaulted inline for lightweight
+    // migration; nil for every non-plan event.
+    var planID: UUID? = nil
+    var workUnitID: String? = nil
+    var objective: String? = nil
+
     @Relationship
     var category: Category?
 

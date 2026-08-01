@@ -132,6 +132,7 @@ struct DeepPlanIntakeView: View {
             title: result.title,
             goalType: result.goalType == "project" ? .project : .study,
             deadline: result.deadline,
+            weeklyHours: weeklyHours,
             neededMinutes: result.capacity.neededMinutes,
             availableMinutes: result.capacity.availableMinutes
         )

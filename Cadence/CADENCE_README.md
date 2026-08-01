@@ -545,7 +545,8 @@ The planner is being rebuilt around a **rolling week-by-week loop** rather than 
 
 - **Lives in the Overview tab**, split via a top segmented control `Planner | Stats` (`OverviewTabView`); the planner is primary.
 - **Increment 1 (done):** `POST /v1/plan/skeleton` (server) + one-shot intake form (`DeepPlanIntakeView`) → skeleton persisted as SwiftData **`ProjectPlan` / `WorkUnit`** models, rendered with a **cushion** badge (committed hours vs. estimated work) and the ordered work units (`DeepPlannerView`). Two work-unit archetypes: `milestone` (complete once, in order) and `repetition` (revisit at growing gaps — spaced retrieval).
-- **Next:** weekly placement (`/v1/plan/week`, reusing the shared expander), a progress/review card, then multiturn clarify intake (`/v1/plan/intake`) + rebudget.
+- **Increment 2 (done):** `POST /v1/plan/week` — **deterministic, no Claude call**. `services/weeklyPlanner.js` selects the units due in the coming week (walking `afterUnit` / `minGapDays` / `notLastNDaysBeforeDeadline` against progress), caps at the weekly budget, and packs sessions into free slots round-robin across days. The **"Plan this week"** button (`DeepPlannerView`) computes progress from events already linked to the plan, calls the route, and inserts the returned sessions as `Event`s carrying `planID` / `workUnitID` / `objective` (schedules reminders like any AI-added event).
+- **Next:** a weekly review/progress card (completed vs. missed, feedback note) + deterministic missed-session repair, then multiturn clarify intake (`/v1/plan/intake`) + rebudget.
 
 ---
 

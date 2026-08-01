@@ -343,6 +343,51 @@ test("POST /v1/plan/skeleton: an invalid archetype twice → 502 AI_UNPARSEABLE"
   } finally { close(); }
 });
 
+test("POST /v1/plan/week places due units into free slots without calling Claude", async () => {
+  let called = false;
+  const fake = async () => { called = true; return "{}"; };
+  const { post, close } = boot(fake);
+  try {
+    const { status, body } = await post("/v1/plan/week", {
+      now: "2026-07-06T08:00:00+03:00", timezone: "Europe/Bucharest",
+      prefs: { workStartHour: 9, workEndHour: 18, bufferMinutes: 15 },
+      events: [],
+      weeklyHours: 10,
+      plan: {
+        goalType: "study", deadline: "2026-08-05",
+        workUnits: [
+          { id: "W1", title: "Ch.1–3", objective: "Summarise ch.1–3", estimatedMinutes: 120, archetype: "repetition",
+            constraints: { afterUnit: null, repeatOf: null, minGapDays: null, notLastNDaysBeforeDeadline: 3 } },
+          { id: "W2", title: "Ch.4–6", objective: "Summarise ch.4–6", estimatedMinutes: 90, archetype: "repetition",
+            constraints: { afterUnit: "W1", repeatOf: null, minGapDays: null, notLastNDaysBeforeDeadline: 3 } },
+        ],
+      },
+      window: { start: "2026-07-06T00:00:00+03:00", end: "2026-07-12T23:59:00+03:00" },
+      progress: [],
+    });
+    assert.equal(status, 200);
+    assert.equal(called, false); // deterministic — no model
+    // W2 is gated behind W1 (not exhausted), so only W1 places this week.
+    assert.deepEqual(body.events.map((e) => e.workUnitId), ["W1"]);
+    assert.equal(body.events[0].objective, "Summarise ch.1–3");
+    assert.equal(body.events[0].category, "Study");
+    assert.match(body.events[0].start, /^2026-07-0/);
+  } finally { close(); }
+});
+
+test("POST /v1/plan/week rejects a missing plan / empty window → 400", async () => {
+  const { post, close } = boot(async () => "{}");
+  try {
+    const noPlan = await post("/v1/plan/week", {
+      now: "2026-07-06T08:00:00+03:00", timezone: "Europe/Bucharest",
+      prefs: { workStartHour: 9, workEndHour: 18, bufferMinutes: 15 }, events: [],
+      window: { start: "2026-07-06T00:00:00+03:00", end: "2026-07-12T23:59:00+03:00" },
+    });
+    assert.equal(noPlan.status, 400);
+    assert.equal(noPlan.body.error.code, "BAD_REQUEST");
+  } finally { close(); }
+});
+
 test("POST /v1/habits/analysis returns trimmed plain-text insight", async () => {
   const fake = async ({ payload }) => {
     assert.match(payload, /HABITS_WEEK: Reading=5\(↑ from 3\)/);

@@ -12,8 +12,14 @@ struct DeepPlannerView: View {
     @Environment(\.theme) private var theme
     @Environment(\.modelContext) private var context
     @Query(sort: \ProjectPlan.createdAt, order: .reverse) private var plans: [ProjectPlan]
+    @Query(sort: \Event.startTime) private var allEvents: [Event]
+    @Query private var prefsResults: [UserPreferences]
+    @Query private var categories: [Category]
 
     @State private var showIntake = false
+    @State private var isPlanning = false
+    @State private var planError: String?
+    @State private var lastPlannedCount: Int?
 
     private var activePlan: ProjectPlan? { plans.first }
 
@@ -71,6 +77,7 @@ struct DeepPlannerView: View {
             }
 
             cushionBadge(plan)
+            planWeekButton(plan)
 
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(plan.orderedUnits) { unitRow($0) }
@@ -79,6 +86,139 @@ struct DeepPlannerView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
         .cardStyle()
+    }
+
+    private func planWeekButton(_ plan: ProjectPlan) -> some View {
+        VStack(spacing: 6) {
+            Button { planThisWeek(plan) } label: {
+                Group {
+                    if isPlanning {
+                        ProgressView().tint(.white)
+                    } else {
+                        Label("Plan this week", systemImage: "calendar.badge.plus")
+                            .font(.subheadline.weight(.semibold))
+                    }
+                }
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(theme.accentGradient)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+            }
+            .disabled(isPlanning)
+
+            if let planError {
+                Text(planError).font(.caption).foregroundColor(.red)
+            } else if let n = lastPlannedCount {
+                Text(n == 0 ? "Nothing new to schedule this week — you're on track."
+                            : "Added \(n) session\(n == 1 ? "" : "s") to your week.")
+                    .font(.caption).foregroundColor(theme.text2)
+            }
+        }
+    }
+
+    // MARK: - Plan this week
+
+    /// Deterministic weekly placement: snapshot the plan on the main actor, ask
+    /// the server which sessions are due, then insert them as linked Events.
+    private func planThisWeek(_ plan: ProjectPlan) {
+        guard !isPlanning else { return }
+        planError = nil
+        lastPlannedCount = nil
+        isPlanning = true
+
+        let planID = plan.id
+        let goalType = plan.goalType == .project ? "project" : "study"
+        let deadline = plan.deadline
+        let weeklyHours = plan.weeklyHours
+        let units = plan.orderedUnits.map { u in
+            WorkUnitData(
+                id: u.unitKey, title: u.title, objective: u.objective,
+                estimatedMinutes: u.estimatedMinutes,
+                archetype: u.archetype == .repetition ? "repetition" : "milestone",
+                afterUnit: u.afterUnit, repeatOf: u.repeatOf,
+                minGapDays: u.minGapDays, notLastNDaysBeforeDeadline: u.notLastNDaysBeforeDeadline
+            )
+        }
+        let progress = progressFor(plan)
+        let windowStart = Date.now
+        let windowEnd = Calendar.current.date(byAdding: .day, value: 7, to: windowStart) ?? windowStart
+        let prefs = prefsResults.first ?? UserPreferences()
+        let eventsSnapshot = allEvents
+
+        Task {
+            do {
+                let planned = try await AIService().planWeek(
+                    goalType: goalType, deadline: deadline, workUnits: units,
+                    windowStart: windowStart, windowEnd: windowEnd, weeklyHours: weeklyHours,
+                    progress: progress, events: eventsSnapshot,
+                    preferences: prefs, categories: categories
+                )
+                insertSessions(planned, planID: planID, prefs: prefs)
+                lastPlannedCount = planned.count
+            } catch {
+                planError = (error as? AIServiceError)?.errorDescription ?? "Couldn't plan the week. Try again."
+            }
+            isPlanning = false
+        }
+    }
+
+    /// Per-unit progress from events already linked to this plan — so scheduled
+    /// work isn't replanned and recall gaps are measured from the last session.
+    private func progressFor(_ plan: ProjectPlan) -> [WorkUnitProgress] {
+        let linked = allEvents.filter { $0.planID == plan.id }
+        return plan.orderedUnits.map { unit in
+            let unitEvents = linked.filter { $0.workUnitID == unit.unitKey }
+            let scheduled = unitEvents.reduce(0) { $0 + Int($1.duration / 60) }
+            return WorkUnitProgress(
+                workUnitId: unit.unitKey,
+                scheduledMinutes: scheduled,
+                lastSessionDate: unitEvents.map(\.startTime).max()
+            )
+        }
+    }
+
+    private func insertSessions(_ sessions: [PlannedEventData], planID: UUID, prefs: UserPreferences) {
+        let svc = NotificationService()
+        for session in sessions {
+            let event = Event(
+                title: session.title,
+                startTime: session.start,
+                endTime: session.end,
+                category: resolveOrCreateCategory(named: session.categoryName),
+                source: .ai
+            )
+            event.planID = planID
+            event.workUnitID = session.workUnitId
+            event.objective = session.objective
+            context.insert(event)
+            scheduleNotifications(for: event, prefs: prefs, svc: svc)
+        }
+        try? context.save()
+        WidgetSync.refresh()
+    }
+
+    /// Existing category by case-insensitive name, or a new one (mirrors the
+    /// AIInputView rule — never fail a plan just because a category is new).
+    private func resolveOrCreateCategory(named name: String) -> Category? {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return nil }
+        if let existing = categories.first(where: { $0.name.lowercased() == trimmed.lowercased() }) {
+            return existing
+        }
+        let palette = AddCategoryView.palette
+        let created = Category(name: trimmed, colorHex: palette[abs(trimmed.hashValue) % palette.count])
+        context.insert(created)
+        return created
+    }
+
+    private func scheduleNotifications(for event: Event, prefs: UserPreferences, svc: NotificationService) {
+        guard svc.isNotificationEnabled(for: event, prefs: prefs) else { return }
+        event.notificationIdentifier = svc.scheduleEventReminder(
+            for: event, reminderMinutes: prefs.defaultReminderMinutes
+        )
+        svc.scheduleEventStartAlert(for: event, reminderMinutes: prefs.defaultReminderMinutes)
+        svc.scheduleMissedEventAlert(for: event)
     }
 
     private func cushionBadge(_ plan: ProjectPlan) -> some View {

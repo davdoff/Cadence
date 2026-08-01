@@ -49,6 +49,25 @@ struct PlanCapacity {
     var cushionMinutes: Int
 }
 
+/// Per-unit progress the client computes from events already linked to a plan,
+/// fed into weekly planning so finished/scheduled work isn't replanned.
+struct WorkUnitProgress {
+    var workUnitId: String
+    var scheduledMinutes: Int
+    var lastSessionDate: Date?
+}
+
+/// A session the deterministic weekly planner placed. The view creates an Event
+/// from it, linked back to the plan via workUnitId.
+struct PlannedEventData {
+    var title: String
+    var start: Date
+    var end: Date
+    var categoryName: String
+    var workUnitId: String
+    var objective: String
+}
+
 enum AIServiceError: LocalizedError {
     case invalidResponse
     case apiError(statusCode: Int)
@@ -468,5 +487,97 @@ extension AIService {
                 cushionMinutes: r.capacity.cushionMinutes
             )
         )
+    }
+}
+
+// MARK: - Deep Planner Weekly Placement (/v1/plan/week)
+
+extension AIService {
+    /// Deterministic — the server places the units due in the window into free
+    /// slots (no model call). Returns the sessions; the view creates linked Events.
+    func planWeek(
+        goalType: String,
+        deadline: Date?,
+        workUnits: [WorkUnitData],
+        windowStart: Date,
+        windowEnd: Date,
+        weeklyHours: Int,
+        progress: [WorkUnitProgress],
+        events: [Event],
+        preferences: UserPreferences,
+        categories: [Category] = []
+    ) async throws -> [PlannedEventData] {
+        let iso = Self.deviceISOFormatter()
+        let dayFmt = DateFormatter()
+        dayFmt.dateFormat = "yyyy-MM-dd"
+        dayFmt.locale = Locale(identifier: "en_US_POSIX")
+
+        struct UnitDTO: Encodable {
+            struct Constraints: Encodable {
+                let afterUnit: String?; let repeatOf: String?
+                let minGapDays: Int?; let notLastNDaysBeforeDeadline: Int?
+            }
+            let id: String; let title: String; let objective: String
+            let estimatedMinutes: Int; let archetype: String
+            let constraints: Constraints
+        }
+        struct PlanDTO: Encodable { let goalType: String; let deadline: String?; let workUnits: [UnitDTO] }
+        struct WindowDTO: Encodable { let start: String; let end: String }
+        struct ProgressDTO: Encodable { let workUnitId: String; let scheduledMinutes: Int; let lastSessionDate: String? }
+        struct Request: Encodable {
+            let now: String; let timezone: String
+            let plan: PlanDTO; let window: WindowDTO; let weeklyHours: Int
+            let progress: [ProgressDTO]
+            let events: [EventSnapshotDTO]; let prefs: PrefsSnapshotDTO
+        }
+
+        let now = Date.now
+        let body = try JSONEncoder().encode(Request(
+            now: iso.string(from: now),
+            timezone: TimeZone.current.identifier,
+            plan: PlanDTO(
+                goalType: goalType,
+                deadline: deadline.map { dayFmt.string(from: $0) },
+                workUnits: workUnits.map {
+                    UnitDTO(
+                        id: $0.id, title: $0.title, objective: $0.objective,
+                        estimatedMinutes: $0.estimatedMinutes, archetype: $0.archetype,
+                        constraints: .init(
+                            afterUnit: $0.afterUnit, repeatOf: $0.repeatOf,
+                            minGapDays: $0.minGapDays, notLastNDaysBeforeDeadline: $0.notLastNDaysBeforeDeadline
+                        )
+                    )
+                }
+            ),
+            window: WindowDTO(start: iso.string(from: windowStart), end: iso.string(from: windowEnd)),
+            weeklyHours: weeklyHours,
+            progress: progress.map {
+                ProgressDTO(workUnitId: $0.workUnitId, scheduledMinutes: $0.scheduledMinutes,
+                            lastSessionDate: $0.lastSessionDate.map { iso.string(from: $0) })
+            },
+            events: Self.snapshots(events, now: now, iso: iso),
+            prefs: PrefsSnapshotDTO(preferences: preferences, categories: categories)
+        ))
+        let data = try await exchange(route: "/v1/plan/week", body: body)
+
+        struct Response: Decodable {
+            struct Item: Decodable {
+                let title: String; let start: String; let end: String
+                let category: String; let workUnitId: String; let objective: String
+            }
+            let events: [Item]
+        }
+        guard let r = try? JSONDecoder().decode(Response.self, from: data) else {
+            throw AIServiceError.invalidResponse
+        }
+        return try r.events.map { item in
+            guard let start = iso.date(from: item.start), let end = iso.date(from: item.end) else {
+                throw AIServiceError.invalidResponse
+            }
+            return PlannedEventData(
+                title: item.title, start: start, end: end,
+                categoryName: item.category, workUnitId: item.workUnitId, objective: item.objective
+            )
+        }
     }
 }
