@@ -101,6 +101,22 @@ WEEKLY_HOURS: ${weeklyHours}
 WEEKS_AVAILABLE: ${weeksAvailable}
 CONSTRAINTS: "${constraints}"`);
 
+const buildPlanTweak = ({ now, plan, sessions, instruction }) => {
+  const units = plan.workUnits.length
+    ? plan.workUnits.map((u) => `- ${u.id} "${u.title}": ${u.objective}`).join("\n")
+    : "none";
+  const sess = sessions
+    .map((s) => `[${s.ref}] "${s.title}" | ${dayAbbr(s.start)} ${timeRange(s)}\n  objective: ${s.objective || "(none)"}`)
+    .join("\n");
+  return withNow(now, `GOAL: "${plan.title}"
+TYPE: ${plan.goalType}
+WORK_UNITS:
+${units}
+SELECTED_SESSIONS:
+${sess}
+INSTRUCTION: "${instruction}"`);
+};
+
 const buildGenerate = ({ now, period, goals, freeSlots, prefs }) =>
   withNow(now, `PERIOD: ${ymd(period.start)} to ${ymd(period.end)}
 GOALS: "${goals}"
@@ -109,5 +125,5 @@ PREFS: ${prefsLine(prefs)}`);
 
 module.exports = {
   buildAdd, buildMove, buildReschedule, buildMealSuggestion,
-  buildHabits, buildProjectPlan, buildInterpret, buildGenerate, buildPlanSkeleton,
+  buildHabits, buildProjectPlan, buildInterpret, buildGenerate, buildPlanSkeleton, buildPlanTweak,
 };

@@ -214,4 +214,27 @@ Rules:
 - Include every field on every unit; use null where a constraint does not apply.
 - Do not include any explanation, markdown, or extra keys.`;
 
-module.exports = { scheduling, habit, mealSuggestion, projectPlan, interpret, generate, planSkeleton };
+const planTweak = `You help a user tweak sessions that are already scheduled as part of a larger plan. You are given the plan's goal and its work units (for context only), the sessions the user selected, and a free-form instruction. Apply the instruction to those sessions.
+
+You may change, per session:
+- "title": a short label.
+- "objective": ONE concrete, checkable objective. If the user says the objective is vague or they don't know what to do, rewrite it into a specific, actionable objective that spells out exactly what to do and how to check it (e.g. "Redo problem set 3 §B (Q1–Q8) without notes, then verify each against the solutions").
+- "durationMinutes": a new session length in whole minutes.
+- "done": true when the user says that session's work is already finished.
+
+Rules:
+- Only touch the sessions you were given, each identified by its "ref". Echo the ref back exactly.
+- Include "ref" and "summary" on every edit; include title / objective / durationMinutes / done ONLY when you actually change them.
+- Do NOT change a session's date or start time — the user reschedules those by hand. Never invent a new session.
+- If the instruction does not apply to a session, omit that session entirely.
+- "summary" is one short human sentence describing what you changed ("Rewrote the objective into concrete steps.", "Marked as done.").
+
+Respond with exactly this JSON and nothing else:
+{
+  "edits": [
+    { "ref": "session ref", "objective": "…", "title": "…", "durationMinutes": 90, "done": true, "summary": "what changed" }
+  ]
+}
+Do not include any explanation, markdown, or extra keys.`;
+
+module.exports = { scheduling, habit, mealSuggestion, projectPlan, interpret, generate, planSkeleton, planTweak };

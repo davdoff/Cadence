@@ -20,8 +20,24 @@ struct DeepPlannerView: View {
 
     @State private var showIntake = false
     @State private var isPlanning = false
+    @State private var isFindingNext = false
     @State private var planError: String?
     @State private var lastPlannedCount: Int?
+    @State private var sessionDraft: PlanSessionDraft?
+
+    // Session editing / gallery-style multi-select for AI tweaks.
+    @State private var isSelecting = false
+    @State private var selectedSessionIDs: Set<UUID> = []
+    @State private var editingEvent: Event?
+    @State private var tweakRequest: TweakRequest?
+
+    /// Wrapper so the tweak sheet is presented `item`-style with a snapshot of the
+    /// chosen sessions (selection state can change underneath it otherwise).
+    private struct TweakRequest: Identifiable {
+        let id = UUID()
+        let plan: ProjectPlan
+        let events: [Event]
+    }
 
     /// The selected plan, or the newest when the stored id is missing (fresh
     /// install, or right after deleting the active plan).
@@ -65,6 +81,15 @@ struct DeepPlannerView: View {
                 activePlanIDString = newID.uuidString
             }
         }
+        .sheet(item: $sessionDraft) { draft in
+            PlanSessionSchedulerView(draft: draft)
+        }
+        .sheet(item: $editingEvent) { event in
+            AddEventView(editingEvent: event)
+        }
+        .sheet(item: $tweakRequest) { req in
+            PlanTweakSheet(plan: req.plan, sessions: req.events)
+        }
     }
 
     // MARK: - Active plan
@@ -87,6 +112,7 @@ struct DeepPlannerView: View {
 
             cushionBadge(plan)
             planWeekButton(plan)
+            scheduleNextButton(plan)
 
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(plan.orderedUnits) { unitRow($0) }
@@ -95,6 +121,144 @@ struct DeepPlannerView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
         .cardStyle()
+
+        let sessions = planSessions(for: plan)
+        if !sessions.isEmpty {
+            sessionsSection(plan, sessions)
+        }
+    }
+
+    // MARK: - Scheduled sessions (edit manually, or tweak with AI)
+
+    /// This plan's scheduled sessions from today onward, soonest first. Past
+    /// sessions are hidden to keep the list about what's still actionable.
+    private func planSessions(for plan: ProjectPlan) -> [Event] {
+        let dayStart = Calendar.current.startOfDay(for: .now)
+        return allEvents
+            .filter { $0.planID == plan.id && $0.endTime >= dayStart }
+            .sorted { $0.startTime < $1.startTime }
+    }
+
+    private var selectedEvents: [Event] {
+        guard let plan = activePlan else { return [] }
+        return planSessions(for: plan).filter { selectedSessionIDs.contains($0.id) }
+    }
+
+    @ViewBuilder
+    private func sessionsSection(_ plan: ProjectPlan, _ sessions: [Event]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Sessions")
+                    .font(.headline).foregroundColor(theme.text)
+                Spacer()
+                Button(isSelecting ? "Done" : "Select") {
+                    withAnimation { isSelecting.toggle() }
+                    if !isSelecting { selectedSessionIDs.removeAll() }
+                }
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(theme.accent)
+            }
+
+            VStack(spacing: 8) {
+                ForEach(sessions) { sessionRow($0) }
+            }
+
+            if isSelecting {
+                Button { startTweak(plan) } label: {
+                    Label(selectedSessionIDs.isEmpty ? "Tweak with AI"
+                                                      : "Tweak \(selectedSessionIDs.count) with AI",
+                          systemImage: "wand.and.stars")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(theme.accentGradient)
+                        .clipShape(RoundedRectangle(cornerRadius: 14))
+                }
+                .disabled(selectedSessionIDs.isEmpty)
+                .opacity(selectedSessionIDs.isEmpty ? 0.5 : 1)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .cardStyle()
+    }
+
+    @ViewBuilder
+    private func sessionRow(_ event: Event) -> some View {
+        let selected = selectedSessionIDs.contains(event.id)
+        Button {
+            if isSelecting { toggleSelection(event) } else { editingEvent = event }
+        } label: {
+            HStack(spacing: 10) {
+                if isSelecting {
+                    Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                        .foregroundColor(selected ? theme.accent : theme.text2)
+                        .font(.title3)
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(event.title)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundColor(theme.text)
+                            .strikethrough(event.status == .completed)
+                        if event.status == .completed {
+                            Image(systemName: "checkmark.seal.fill")
+                                .font(.caption).foregroundColor(.green)
+                        }
+                    }
+                    Text(sessionTimeLabel(event))
+                        .font(.caption).foregroundColor(theme.text2)
+                    if let objective = event.objective, !objective.isEmpty {
+                        Text(objective)
+                            .font(.caption).foregroundColor(theme.text2).lineLimit(2)
+                    }
+                }
+                Spacer(minLength: 0)
+                if !isSelecting {
+                    Image(systemName: "chevron.right").font(.caption).foregroundColor(theme.light)
+                }
+            }
+            .contentShape(Rectangle())
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button { editingEvent = event } label: { Label("Edit time & title", systemImage: "pencil") }
+            Button { markDone(event) } label: { Label("Mark done", systemImage: "checkmark.circle") }
+            if let plan = activePlan {
+                Button { tweakRequest = TweakRequest(plan: plan, events: [event]) } label: {
+                    Label("Tweak with AI", systemImage: "wand.and.stars")
+                }
+            }
+        }
+    }
+
+    private func toggleSelection(_ event: Event) {
+        if selectedSessionIDs.contains(event.id) { selectedSessionIDs.remove(event.id) }
+        else { selectedSessionIDs.insert(event.id) }
+    }
+
+    private func startTweak(_ plan: ProjectPlan) {
+        let events = selectedEvents
+        guard !events.isEmpty else { return }
+        tweakRequest = TweakRequest(plan: plan, events: events)
+        withAnimation { isSelecting = false }
+        selectedSessionIDs.removeAll()
+    }
+
+    private func markDone(_ event: Event) {
+        event.status = .completed
+        NotificationService().cancelEventNotifications(for: event)
+        try? context.save()
+        WidgetSync.refresh()
+    }
+
+    private func sessionTimeLabel(_ event: Event) -> String {
+        let day = event.startTime.formatted(.dateTime.weekday(.abbreviated).month().day())
+        let start = event.startTime.formatted(.dateTime.hour().minute())
+        let end = event.endTime.formatted(.dateTime.hour().minute())
+        return "\(day) · \(start)–\(end)"
     }
 
     /// Plan title as a switcher: tap to pick among stored plans. The chevron
@@ -158,49 +322,125 @@ struct DeepPlannerView: View {
         }
     }
 
-    // MARK: - Plan this week
+    /// Secondary path: place one session at a time, by hand. Asks the server for
+    /// the sessions due this week (same deterministic call), takes the first, and
+    /// opens the editor preset to its soonest opening — the user picks where it lands.
+    private func scheduleNextButton(_ plan: ProjectPlan) -> some View {
+        Button { scheduleNextSession(plan) } label: {
+            Group {
+                if isFindingNext {
+                    ProgressView().tint(theme.accent)
+                } else {
+                    Label("Schedule a session myself", systemImage: "hand.point.up.left")
+                        .font(.subheadline.weight(.semibold))
+                }
+            }
+            .foregroundColor(theme.accent)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 11)
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(theme.accent.opacity(0.5), lineWidth: 1))
+        }
+        .disabled(isFindingNext || isPlanning)
+    }
 
-    /// Deterministic weekly placement: snapshot the plan on the main actor, ask
-    /// the server which sessions are due, then insert them as linked Events.
+    // MARK: - Weekly placement
+
+    /// The `/v1/plan/week` inputs, snapshotted on the main actor (SwiftData reads
+    /// must not cross to the Task). Shared by the auto and manual paths.
+    private struct WeekInputs {
+        let planID: UUID
+        let goalType: String
+        let deadline: Date?
+        let weeklyHours: Int
+        let units: [WorkUnitData]
+        let progress: [WorkUnitProgress]
+        let windowStart: Date
+        let windowEnd: Date
+        let prefs: UserPreferences
+        let events: [Event]
+    }
+
+    private func weekInputs(_ plan: ProjectPlan) -> WeekInputs {
+        let windowStart = Date.now
+        return WeekInputs(
+            planID: plan.id,
+            goalType: plan.goalType == .project ? "project" : "study",
+            deadline: plan.deadline,
+            weeklyHours: plan.weeklyHours,
+            units: plan.orderedUnits.map { u in
+                WorkUnitData(
+                    id: u.unitKey, title: u.title, objective: u.objective,
+                    estimatedMinutes: u.estimatedMinutes,
+                    archetype: u.archetype == .repetition ? "repetition" : "milestone",
+                    afterUnit: u.afterUnit, repeatOf: u.repeatOf,
+                    minGapDays: u.minGapDays, notLastNDaysBeforeDeadline: u.notLastNDaysBeforeDeadline
+                )
+            },
+            progress: progressFor(plan),
+            windowStart: windowStart,
+            windowEnd: Calendar.current.date(byAdding: .day, value: 7, to: windowStart) ?? windowStart,
+            prefs: prefsResults.first ?? UserPreferences(),
+            events: allEvents
+        )
+    }
+
+    private func requestSessions(_ i: WeekInputs) async throws -> [PlannedEventData] {
+        try await AIService().planWeek(
+            goalType: i.goalType, deadline: i.deadline, workUnits: i.units,
+            windowStart: i.windowStart, windowEnd: i.windowEnd, weeklyHours: i.weeklyHours,
+            progress: i.progress, events: i.events,
+            preferences: i.prefs, categories: categories
+        )
+    }
+
+    /// Deterministic weekly placement: ask the server which sessions are due, then
+    /// insert them all as linked Events at the soonest slots (never in the past —
+    /// the server clamps the window to `now`).
     private func planThisWeek(_ plan: ProjectPlan) {
         guard !isPlanning else { return }
         planError = nil
         lastPlannedCount = nil
         isPlanning = true
-
-        let planID = plan.id
-        let goalType = plan.goalType == .project ? "project" : "study"
-        let deadline = plan.deadline
-        let weeklyHours = plan.weeklyHours
-        let units = plan.orderedUnits.map { u in
-            WorkUnitData(
-                id: u.unitKey, title: u.title, objective: u.objective,
-                estimatedMinutes: u.estimatedMinutes,
-                archetype: u.archetype == .repetition ? "repetition" : "milestone",
-                afterUnit: u.afterUnit, repeatOf: u.repeatOf,
-                minGapDays: u.minGapDays, notLastNDaysBeforeDeadline: u.notLastNDaysBeforeDeadline
-            )
-        }
-        let progress = progressFor(plan)
-        let windowStart = Date.now
-        let windowEnd = Calendar.current.date(byAdding: .day, value: 7, to: windowStart) ?? windowStart
-        let prefs = prefsResults.first ?? UserPreferences()
-        let eventsSnapshot = allEvents
+        let inputs = weekInputs(plan)
 
         Task {
             do {
-                let planned = try await AIService().planWeek(
-                    goalType: goalType, deadline: deadline, workUnits: units,
-                    windowStart: windowStart, windowEnd: windowEnd, weeklyHours: weeklyHours,
-                    progress: progress, events: eventsSnapshot,
-                    preferences: prefs, categories: categories
-                )
-                insertSessions(planned, planID: planID, prefs: prefs)
+                let planned = try await requestSessions(inputs)
+                insertSessions(planned, planID: inputs.planID, prefs: inputs.prefs)
                 lastPlannedCount = planned.count
             } catch {
                 planError = (error as? AIServiceError)?.errorDescription ?? "Couldn't plan the week. Try again."
             }
             isPlanning = false
+        }
+    }
+
+    /// Take the next due session and hand it to the manual editor. Building the
+    /// draft (not inserting) is the whole difference from `planThisWeek`.
+    private func scheduleNextSession(_ plan: ProjectPlan) {
+        guard !isFindingNext else { return }
+        planError = nil
+        lastPlannedCount = nil
+        isFindingNext = true
+        let inputs = weekInputs(plan)
+
+        Task {
+            do {
+                let planned = try await requestSessions(inputs)
+                if let next = planned.first {
+                    let minutes = max(15, Int(next.end.timeIntervalSince(next.start) / 60))
+                    sessionDraft = PlanSessionDraft(
+                        planID: inputs.planID, workUnitID: next.workUnitId,
+                        title: next.title, objective: next.objective,
+                        categoryName: next.categoryName, durationMinutes: minutes
+                    )
+                } else {
+                    lastPlannedCount = 0
+                }
+            } catch {
+                planError = (error as? AIServiceError)?.errorDescription ?? "Couldn't find the next session. Try again."
+            }
+            isFindingNext = false
         }
     }
 

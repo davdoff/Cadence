@@ -285,4 +285,24 @@ function parsePlanSkeleton(text) {
   };
 }
 
-module.exports = { parseDecision, parseInterpret, parseGenerate, parseMealSuggestions, parseProjectPlan, parsePlanSkeleton };
+// Per-session edits: ref + summary are required; every other field is present
+// only when the model actually changed it (omitted ones stay untouched client-side).
+function parsePlanTweak(text) {
+  const raw = parseJSON(text);
+  if (!Array.isArray(raw.edits)) fail("tweak response without an edits array");
+  return {
+    edits: raw.edits.map((e, i) => {
+      const edit = {
+        ref: str(e?.ref, `edits[${i}].ref`),
+        summary: str(e?.summary, `edits[${i}].summary`),
+      };
+      if (typeof e?.title === "string" && e.title.length > 0) edit.title = e.title;
+      if (typeof e?.objective === "string" && e.objective.length > 0) edit.objective = e.objective;
+      if (Number.isInteger(e?.durationMinutes) && e.durationMinutes > 0) edit.durationMinutes = e.durationMinutes;
+      if (typeof e?.done === "boolean") edit.done = e.done;
+      return edit;
+    }),
+  };
+}
+
+module.exports = { parseDecision, parseInterpret, parseGenerate, parseMealSuggestions, parseProjectPlan, parsePlanSkeleton, parsePlanTweak };

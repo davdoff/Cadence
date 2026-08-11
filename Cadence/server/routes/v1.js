@@ -321,6 +321,51 @@ function createV1Router({ callClaude, fetchImpl = globalThis.fetch }) {
     }));
   }));
 
+  // ── Deep planner — content tweak of selected sessions ─────────────────────
+  // A small, cheap call: the plan's work units are shared as context, so this
+  // runs on the default (Sonnet) secretary model, NOT the Opus planner. Edits
+  // are content-only (title / objective / duration / done) — placement stays
+  // deterministic/manual, so no free-slot computation is needed here.
+
+  router.post("/plan/tweak", wrap(async (req, res) => {
+    const { now, zone } = parseBase(req.body);
+
+    const planBody = req.body.plan;
+    if (typeof planBody !== "object" || planBody === null) throw badRequest('Missing "plan"');
+    const plan = {
+      title: typeof planBody.title === "string" ? planBody.title : "",
+      goalType: planBody.goalType === "project" ? "project" : "study",
+      workUnits: Array.isArray(planBody.workUnits)
+        ? planBody.workUnits
+            .filter((u) => u && typeof u.id === "string")
+            .map((u) => ({
+              id: u.id,
+              title: typeof u.title === "string" ? u.title : "",
+              objective: typeof u.objective === "string" ? u.objective : "",
+            }))
+        : [],
+    };
+
+    if (!Array.isArray(req.body.sessions) || req.body.sessions.length === 0) throw badRequest('"sessions" is required');
+    const sessions = req.body.sessions.map((s, i) => {
+      if (typeof s?.ref !== "string") throw badRequest(`"sessions[${i}].ref" is required`);
+      return {
+        ref: s.ref,
+        title: typeof s.title === "string" ? s.title : "",
+        objective: typeof s.objective === "string" ? s.objective : "",
+        start: parseISO(s.start, zone, `sessions[${i}].start`),
+        end: parseISO(s.end, zone, `sessions[${i}].end`),
+      };
+    });
+
+    const instruction = requireString(req.body, "instruction");
+
+    const payload = build.buildPlanTweak({ now, plan, sessions, instruction });
+    const result = await callAndParse(callClaude, { system: prompts.planTweak, payload },
+      (raw) => parsers.parsePlanTweak(raw));
+    res.json(result);
+  }));
+
   return router;
 }
 

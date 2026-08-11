@@ -581,3 +581,80 @@ extension AIService {
         }
     }
 }
+
+// MARK: - Deep Planner Session Tweak (/v1/plan/tweak)
+
+/// One session's returned edit. `ref` echoes the event this applies to; only the
+/// fields the model actually changed are non-nil. `summary` is always present.
+struct SessionEditData {
+    let ref: String
+    let title: String?
+    let objective: String?
+    let durationMinutes: Int?
+    let done: Bool?
+    let summary: String
+}
+
+extension AIService {
+    /// A selected session, as sent to the tweak endpoint (ref = the event's id).
+    struct TweakSessionInput {
+        let ref: String
+        let title: String
+        let objective: String
+        let start: Date
+        let end: Date
+    }
+
+    /// Small, cheap content edit of the selected sessions — runs on the server's
+    /// default (Sonnet) model, sharing the plan's work units as context. Returns
+    /// per-session edits; the view applies them to SwiftData (CLAUDE.md rule 3).
+    func tweakSessions(
+        planTitle: String,
+        goalType: String,
+        workUnits: [WorkUnitData],
+        sessions: [TweakSessionInput],
+        instruction: String
+    ) async throws -> [SessionEditData] {
+        let iso = Self.deviceISOFormatter()
+
+        struct UnitDTO: Encodable { let id: String; let title: String; let objective: String }
+        struct PlanDTO: Encodable { let title: String; let goalType: String; let workUnits: [UnitDTO] }
+        struct SessionDTO: Encodable {
+            let ref: String; let title: String; let objective: String; let start: String; let end: String
+        }
+        struct Request: Encodable {
+            let now: String; let timezone: String
+            let plan: PlanDTO; let sessions: [SessionDTO]; let instruction: String
+        }
+
+        let body = try JSONEncoder().encode(Request(
+            now: iso.string(from: .now),
+            timezone: TimeZone.current.identifier,
+            plan: PlanDTO(
+                title: planTitle, goalType: goalType,
+                workUnits: workUnits.map { UnitDTO(id: $0.id, title: $0.title, objective: $0.objective) }
+            ),
+            sessions: sessions.map {
+                SessionDTO(ref: $0.ref, title: $0.title, objective: $0.objective,
+                           start: iso.string(from: $0.start), end: iso.string(from: $0.end))
+            },
+            instruction: instruction
+        ))
+        let data = try await exchange(route: "/v1/plan/tweak", body: body)
+
+        struct Response: Decodable {
+            struct Item: Decodable {
+                let ref: String; let title: String?; let objective: String?
+                let durationMinutes: Int?; let done: Bool?; let summary: String
+            }
+            let edits: [Item]
+        }
+        guard let r = try? JSONDecoder().decode(Response.self, from: data) else {
+            throw AIServiceError.invalidResponse
+        }
+        return r.edits.map {
+            SessionEditData(ref: $0.ref, title: $0.title, objective: $0.objective,
+                            durationMinutes: $0.durationMinutes, done: $0.done, summary: $0.summary)
+        }
+    }
+}

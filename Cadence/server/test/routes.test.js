@@ -388,6 +388,72 @@ test("POST /v1/plan/week rejects a missing plan / empty window → 400", async (
   } finally { close(); }
 });
 
+test("POST /v1/plan/tweak edits selected sessions; shares plan context, uses the default (Sonnet) model", async () => {
+  let seen;
+  const fake = async (opts) => {
+    seen = opts;
+    return JSON.stringify({
+      edits: [
+        { ref: "s1", objective: "Redo §B Q1–Q8 without notes; verify each vs solutions", summary: "Rewrote the objective into concrete steps." },
+        { ref: "s2", done: true, summary: "Marked as done." },
+        // A field the model shouldn't have sent as empty — dropped by the parser.
+        { ref: "s3", title: "", durationMinutes: 90, summary: "Shortened to 90 min." },
+      ],
+    });
+  };
+  const { post, close } = boot(fake);
+  try {
+    const { status, body } = await post("/v1/plan/tweak", {
+      now: BASE_REQ.now, timezone: BASE_REQ.timezone,
+      plan: {
+        title: "Signals & Systems exam prep", goalType: "study",
+        workUnits: [{ id: "W1", title: "Ch.1–3 recall", objective: "Redo worked examples" }],
+      },
+      sessions: [
+        { ref: "s1", title: "Ch.1–3 recall", objective: "study chapter 3", start: "2026-07-07T14:00:00+03:00", end: "2026-07-07T15:30:00+03:00" },
+        { ref: "s2", title: "Ch.1 first pass", objective: "Summarise ch.1", start: "2026-07-06T16:00:00+03:00", end: "2026-07-06T17:00:00+03:00" },
+        { ref: "s3", title: "Ch.2 first pass", objective: "Summarise ch.2", start: "2026-07-08T09:00:00+03:00", end: "2026-07-08T11:00:00+03:00" },
+      ],
+      instruction: "the first objective is too vague; I already did the second; make the third shorter",
+    });
+    assert.equal(status, 200);
+    assert.equal(body.edits.length, 3);
+    assert.equal(body.edits[0].objective, "Redo §B Q1–Q8 without notes; verify each vs solutions");
+    assert.equal(body.edits[1].done, true);
+    assert.equal(body.edits[2].durationMinutes, 90);
+    assert.equal("title" in body.edits[2], false);           // empty title dropped
+    // Content-only call on the cheap model: no model override, no thinking/effort.
+    assert.equal(seen.model, undefined);
+    assert.equal(seen.thinking ?? false, false);
+    assert.equal(seen.effort, undefined);
+    // The plan's work units + the selected sessions + the instruction all reach the prompt.
+    assert.match(seen.payload, /WORK_UNITS:/);
+    assert.match(seen.payload, /\[s1\]/);
+    assert.match(seen.payload, /INSTRUCTION: "the first objective is too vague/);
+    assert.match(seen.system, /tweak sessions/);
+  } finally { close(); }
+});
+
+test("POST /v1/plan/tweak rejects missing sessions / instruction → 400", async () => {
+  const { post, close } = boot(async () => "{}");
+  try {
+    const noSessions = await post("/v1/plan/tweak", {
+      now: BASE_REQ.now, timezone: BASE_REQ.timezone,
+      plan: { title: "X", goalType: "study", workUnits: [] }, instruction: "do a thing",
+    });
+    assert.equal(noSessions.status, 400);
+    assert.equal(noSessions.body.error.code, "BAD_REQUEST");
+
+    const noInstruction = await post("/v1/plan/tweak", {
+      now: BASE_REQ.now, timezone: BASE_REQ.timezone,
+      plan: { title: "X", goalType: "study", workUnits: [] },
+      sessions: [{ ref: "s1", title: "t", objective: "o", start: "2026-07-07T14:00:00+03:00", end: "2026-07-07T15:00:00+03:00" }],
+    });
+    assert.equal(noInstruction.status, 400);
+    assert.equal(noInstruction.body.error.code, "BAD_REQUEST");
+  } finally { close(); }
+});
+
 test("POST /v1/habits/analysis returns trimmed plain-text insight", async () => {
   const fake = async ({ payload }) => {
     assert.match(payload, /HABITS_WEEK: Reading=5\(↑ from 3\)/);
