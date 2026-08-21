@@ -293,9 +293,14 @@ function createV1Router({ callClaude, fetchImpl = globalThis.fetch }) {
     });
 
     if (typeof req.body.window !== "object" || req.body.window === null) throw badRequest('Missing "window"');
-    const windowEnd = parseISO(req.body.window.end, c.zone, "window.end");
+    let windowEnd = parseISO(req.body.window.end, c.zone, "window.end");
     let windowStart = parseISO(req.body.window.start, c.zone, "window.start");
     if (windowStart < c.now) windowStart = c.now;           // never place in the past
+    // Never schedule past the deadline: clamp the window to end-of-deadline-day.
+    if (deadline) {
+      const deadlineEnd = deadline.endOf("day");
+      if (windowEnd > deadlineEnd) windowEnd = deadlineEnd;
+    }
     if (windowEnd <= windowStart) throw badRequest('"window" is empty or entirely in the past');
 
     const progress = Array.isArray(req.body.progress)
@@ -361,8 +366,9 @@ function createV1Router({ callClaude, fetchImpl = globalThis.fetch }) {
     const instruction = requireString(req.body, "instruction");
 
     const payload = build.buildPlanTweak({ now, plan, sessions, instruction });
+    const knownRefs = sessions.map((s) => s.ref);
     const result = await callAndParse(callClaude, { system: prompts.planTweak, payload },
-      (raw) => parsers.parsePlanTweak(raw));
+      (raw) => parsers.parsePlanTweak(raw, { knownRefs }));
     res.json(result);
   }));
 

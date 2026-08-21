@@ -154,11 +154,108 @@ final class HabitTests: XCTestCase {
         XCTAssertEqual(habit.currentStreak, 1)
     }
 
-    func testCurrentStreakIsZeroWhenTodayIsEmpty() {
+    func testCurrentStreakSurvivesUnloggedToday() {
         let habit = makeHabit()
-        // Only yesterday has data — streak starts from today, so it's 0
-        habit.countLog[Habit.key(for: daysAgo(1))] = 1
+        // Three days through yesterday, today not logged yet — the run is still
+        // locked in and only *at risk*.
+        for daysBack in 1...3 {
+            habit.countLog[Habit.key(for: daysAgo(daysBack))] = 1
+        }
+        XCTAssertEqual(habit.currentStreak, 3)
+        XCTAssertEqual(habit.streakState, .atRisk)
+        XCTAssertFalse(habit.isLoggedToday)
+    }
+
+    func testLoggingTodayExtendsStreakAndMarksItSafe() {
+        let habit = makeHabit()
+        for daysBack in 1...3 {
+            habit.countLog[Habit.key(for: daysAgo(daysBack))] = 1
+        }
+        habit.increment()
+        XCTAssertEqual(habit.currentStreak, 4)
+        XCTAssertEqual(habit.streakState, .safe)
+    }
+
+    func testStreakStateIsNoneWithoutAStreak() {
+        let habit = makeHabit()
+        XCTAssertEqual(habit.streakState, .none)
+    }
+
+    func testCurrentStreakIsZeroWhenYesterdayAndTodayAreEmpty() {
+        let habit = makeHabit()
+        // Last log was two days ago — the run ended yesterday.
+        habit.countLog[Habit.key(for: daysAgo(2))] = 1
         XCTAssertEqual(habit.currentStreak, 0)
+        XCTAssertEqual(habit.streakState, .none)
+    }
+
+    // MARK: - Rest days
+
+    func testRestDaysDoNotBreakTheStreak() {
+        let habit = makeHabit()
+        // Turn yesterday into a rest day and log the two days around it.
+        let yesterdayWeekday = Calendar.current.component(.weekday, from: daysAgo(1))
+        habit.activeDaysMask = Habit.allDaysMask & ~(1 << (yesterdayWeekday - 1))
+        habit.countLog[Habit.key(for: daysAgo(0))] = 1
+        habit.countLog[Habit.key(for: daysAgo(2))] = 1
+        XCTAssertEqual(habit.currentStreak, 2)
+    }
+
+    func testStreakStateIsRestWhenTodayIsOffSchedule() {
+        let habit = makeHabit()
+        let todayWeekday = Calendar.current.component(.weekday, from: Date())
+        habit.activeDaysMask = Habit.allDaysMask & ~(1 << (todayWeekday - 1))
+        habit.countLog[Habit.key(for: daysAgo(1))] = 1
+        XCTAssertEqual(habit.currentStreak, 1)
+        XCTAssertEqual(habit.streakState, .rest)
+    }
+
+    func testEmptyActiveDaysMaskFallsBackToEveryDay() {
+        let habit = makeHabit()
+        habit.activeDaysMask = 0
+        XCTAssertTrue(habit.isActiveDay(Date()))
+        XCTAssertTrue(habit.isEveryDaySchedule)
+    }
+
+    func testNewHabitDefaultsToEveryDay() {
+        let habit = makeHabit()
+        XCTAssertEqual(habit.activeDaysMask, Habit.allDaysMask)
+        XCTAssertEqual(habit.activeDays.count, 7)
+    }
+
+    // MARK: - bestStreak / milestones
+
+    func testBestStreakIsZeroWithNoData() {
+        let habit = makeHabit()
+        XCTAssertEqual(habit.bestStreak, 0)
+    }
+
+    func testBestStreakFindsLongestHistoricalRun() {
+        let habit = makeHabit()
+        // 5-day run ten days back, 2-day run ending yesterday.
+        for daysBack in 10...14 { habit.countLog[Habit.key(for: daysAgo(daysBack))] = 1 }
+        for daysBack in 1...2  { habit.countLog[Habit.key(for: daysAgo(daysBack))] = 1 }
+        XCTAssertEqual(habit.bestStreak, 5)
+        XCTAssertEqual(habit.currentStreak, 2)
+    }
+
+    func testBestStreakNeverTrailsCurrentStreak() {
+        let habit = makeHabit()
+        for daysBack in 0...3 { habit.countLog[Habit.key(for: daysAgo(daysBack))] = 1 }
+        XCTAssertEqual(habit.bestStreak, habit.currentStreak)
+    }
+
+    func testMilestonesEarnedAtSevenDays() {
+        let habit = makeHabit()
+        for daysBack in 0...6 { habit.countLog[Habit.key(for: daysAgo(daysBack))] = 1 }
+        XCTAssertEqual(habit.currentStreak, 7)
+        XCTAssertEqual(habit.earnedMilestones, [7])
+    }
+
+    func testNoMilestonesBelowSevenDays() {
+        let habit = makeHabit()
+        for daysBack in 0...2 { habit.countLog[Habit.key(for: daysAgo(daysBack))] = 1 }
+        XCTAssertTrue(habit.earnedMilestones.isEmpty)
     }
 
     // MARK: - countHistory
@@ -230,5 +327,52 @@ final class HabitTests: XCTestCase {
     func testHabitNameIsPreserved() {
         let habit = makeHabit(name: "Meditation")
         XCTAssertEqual(habit.name, "Meditation")
+    }
+
+    // MARK: - Heatmap layout
+
+    func testHeatmapCoversWholeMonthPlusLeadingPadding() {
+        let habit = makeHabit()
+        let cells = HabitHeatmapService.month(containing: Date()) { habit.count(for: $0) }
+        let dayCount = Calendar.current.range(of: .day, in: .month, for: Date())!.count
+        XCTAssertEqual(cells.filter { $0.date != nil }.count, dayCount)
+        XCTAssertLessThan(cells.filter { $0.date == nil }.count, 7)
+    }
+
+    func testHeatmapReflectsCounts() {
+        let habit = makeHabit()
+        habit.countLog[Habit.key(for: Date())] = 3
+        let cells = HabitHeatmapService.month(containing: Date()) { habit.count(for: $0) }
+        let today = cells.first { $0.date.map { Calendar.current.isDateInToday($0) } == true }
+        XCTAssertEqual(today?.count, 3)
+    }
+
+    func testHeatmapLevelScalesWithPeak() {
+        XCTAssertEqual(HabitHeatmapService.level(count: 0, peak: 9), 0)
+        XCTAssertEqual(HabitHeatmapService.level(count: 1, peak: 9), 1)
+        XCTAssertEqual(HabitHeatmapService.level(count: 5, peak: 9), 2)
+        XCTAssertEqual(HabitHeatmapService.level(count: 9, peak: 9), 3)
+    }
+
+    // MARK: - Goal celebration
+
+    func testGoalCelebrationFiresOncePerDay() {
+        let store = UserDefaults(suiteName: "HabitTests-\(UUID().uuidString)")!
+        let id = UUID()
+        XCTAssertTrue(HabitCelebrationTracker.claimCelebration(habitID: id, store: store))
+        XCTAssertFalse(HabitCelebrationTracker.claimCelebration(habitID: id, store: store))
+    }
+
+    func testGoalCelebrationFiresAgainOnANewDay() {
+        let store = UserDefaults(suiteName: "HabitTests-\(UUID().uuidString)")!
+        let id = UUID()
+        XCTAssertTrue(HabitCelebrationTracker.claimCelebration(habitID: id, on: daysAgo(1), store: store))
+        XCTAssertTrue(HabitCelebrationTracker.claimCelebration(habitID: id, on: Date(), store: store))
+    }
+
+    func testGoalCelebrationIsPerHabit() {
+        let store = UserDefaults(suiteName: "HabitTests-\(UUID().uuidString)")!
+        XCTAssertTrue(HabitCelebrationTracker.claimCelebration(habitID: UUID(), store: store))
+        XCTAssertTrue(HabitCelebrationTracker.claimCelebration(habitID: UUID(), store: store))
     }
 }

@@ -30,6 +30,7 @@ struct DeepPlannerView: View {
     @State private var selectedSessionIDs: Set<UUID> = []
     @State private var editingEvent: Event?
     @State private var tweakRequest: TweakRequest?
+    @State private var feedbackDraft = ""
 
     /// Wrapper so the tweak sheet is presented `item`-style with a snapshot of the
     /// chosen sessions (selection state can change underneath it otherwise).
@@ -63,10 +64,7 @@ struct DeepPlannerView: View {
                     Menu {
                         Button { showIntake = true } label: { Label("New plan", systemImage: "plus") }
                         if let plan = activePlan {
-                            Button(role: .destructive) {
-                                context.delete(plan)
-                                activePlanIDString = ""
-                            } label: {
+                            Button(role: .destructive) { deletePlan(plan) } label: {
                                 Label("Delete plan", systemImage: "trash")
                             }
                         }
@@ -89,6 +87,14 @@ struct DeepPlannerView: View {
         }
         .sheet(item: $tweakRequest) { req in
             PlanTweakSheet(plan: req.plan, sessions: req.events)
+        }
+        .onChange(of: activePlanIDString) {
+            // Switching plans must not carry a stale selection (would read
+            // "Tweak 3" yet act on the new plan's — dead UI) or a stale feedback
+            // note from the previous plan.
+            isSelecting = false
+            selectedSessionIDs.removeAll()
+            feedbackDraft = activePlan?.feedbackNote ?? ""
         }
     }
 
@@ -122,26 +128,203 @@ struct DeepPlannerView: View {
         .padding()
         .cardStyle()
 
-        let sessions = planSessions(for: plan)
-        if !sessions.isEmpty {
-            sessionsSection(plan, sessions)
+        let snap = snapshot(for: plan)
+        if snap.needsReview {
+            reviewCard(plan, snap)
+        }
+        let live = snap.upcoming + snap.completed
+        if !live.isEmpty {
+            sessionsSection(plan, live)
         }
     }
 
     // MARK: - Scheduled sessions (edit manually, or tweak with AI)
 
-    /// This plan's scheduled sessions from today onward, soonest first. Past
-    /// sessions are hidden to keep the list about what's still actionable.
-    private func planSessions(for plan: ProjectPlan) -> [Event] {
-        let dayStart = Calendar.current.startOfDay(for: .now)
-        return allEvents
-            .filter { $0.planID == plan.id && $0.endTime >= dayStart }
-            .sorted { $0.startTime < $1.startTime }
+    /// This plan's sessions bucketed into upcoming / completed / missed. Pure
+    /// classification lives in `PlanProgressService` (portable, testable).
+    private func snapshot(for plan: ProjectPlan) -> PlanProgressService.Snapshot {
+        PlanProgressService.snapshot(planID: plan.id, events: allEvents)
+    }
+
+    /// Sessions shown in the main list: upcoming first, then completed history.
+    private func liveSessions(for plan: ProjectPlan) -> [Event] {
+        let snap = snapshot(for: plan)
+        return snap.upcoming + snap.completed
     }
 
     private var selectedEvents: [Event] {
         guard let plan = activePlan else { return [] }
-        return planSessions(for: plan).filter { selectedSessionIDs.contains($0.id) }
+        return liveSessions(for: plan).filter { selectedSessionIDs.contains($0.id) }
+    }
+
+    // MARK: - Weekly review + per-session repair
+
+    /// Shown when a plan has missed/overdue sessions. Summarises the week and lets
+    /// the user resolve each missed session — Redo (reschedule), Skip (count as
+    /// done), or Drop (remove the work) — then carries a feedback note forward.
+    @ViewBuilder
+    private func reviewCard(_ plan: ProjectPlan, _ snap: PlanProgressService.Snapshot) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 8) {
+                Image(systemName: "checklist")
+                Text("Weekly review").font(.headline)
+            }
+            .foregroundColor(theme.text)
+
+            HStack(spacing: 16) {
+                reviewStat("\(snap.completedCount)", "done", .green)
+                reviewStat("\(snap.upcomingCount)", "upcoming", theme.accent)
+                reviewStat("\(snap.missedCount)", "missed", .orange)
+            }
+
+            Text(snap.missedCount == 1 ? "1 session slipped — how do you want to handle it?"
+                                       : "\(snap.missedCount) sessions slipped — how do you want to handle them?")
+                .font(.subheadline).foregroundColor(theme.text2)
+
+            VStack(spacing: 10) {
+                ForEach(snap.missed) { missedRow($0, plan: plan) }
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Note for next week (optional)").font(.caption).foregroundColor(theme.text2)
+                TextField("e.g. fell behind on recall; ch.3 harder than expected",
+                          text: $feedbackDraft, axis: .vertical)
+                    .lineLimit(1...4)
+                    .textFieldStyle(.roundedBorder)
+                    .onAppear { if feedbackDraft.isEmpty { feedbackDraft = plan.feedbackNote } }
+                if feedbackDraft != plan.feedbackNote {
+                    Button("Save note") { plan.feedbackNote = feedbackDraft; try? context.save() }
+                        .font(.caption.weight(.semibold)).foregroundColor(theme.accent)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .cardStyle()
+    }
+
+    private func reviewStat(_ value: String, _ label: String, _ color: Color) -> some View {
+        VStack(spacing: 2) {
+            Text(value).font(.title3.weight(.bold)).foregroundColor(color)
+            Text(label).font(.caption2).foregroundColor(theme.text2)
+        }
+    }
+
+    private func missedRow(_ event: Event, plan: ProjectPlan) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(event.title).font(.subheadline.weight(.semibold)).foregroundColor(theme.text)
+            Text(sessionTimeLabel(event)).font(.caption).foregroundColor(theme.text2)
+            HStack(spacing: 8) {
+                repairButton("Redo", "arrow.clockwise") { redoSession(event) }
+                repairButton("Skip", "checkmark") { skipSession(event) }
+                repairButton("Drop", "trash", tint: .red) { dropSession(event, plan: plan) }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 8).padding(.horizontal, 10)
+        .background(theme.cardSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func repairButton(_ label: String, _ icon: String, tint: Color? = nil,
+                              _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(label, systemImage: icon)
+                .font(.caption.weight(.semibold))
+                .foregroundColor(tint ?? theme.accent)
+                .padding(.vertical, 6).padding(.horizontal, 10)
+                .background((tint ?? theme.accent).opacity(0.12))
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: Repair actions (deterministic — no model call)
+
+    /// Redo: reschedule the *same* event (so it stays linked and keeps covering its
+    /// unit — no duplicate) to the soonest free opening as pending. When nothing
+    /// fits automatically, open the editor so the user places it in place by hand.
+    private func redoSession(_ event: Event) {
+        let prefs = prefsResults.first ?? UserPreferences()
+        let minutes = max(15, Int(event.duration / 60))
+        let svc = NotificationService()
+        svc.cancelEventNotifications(for: event)
+        event.status = .pending
+
+        if let start = soonestOpening(minutes: minutes, prefs: prefs) {
+            event.startTime = start
+            event.endTime = start.addingTimeInterval(TimeInterval(minutes * 60))
+            scheduleNotifications(for: event, prefs: prefs, svc: svc)
+            try? context.save()
+            WidgetSync.refresh()
+        } else {
+            // No opening in the next week — let the user pick a time in the editor.
+            // The event is already back to pending; cancelling keeps it (no loss).
+            try? context.save()
+            editingEvent = event
+        }
+    }
+
+    /// Skip: retire the work without pretending it was done — mark completed so it
+    /// leaves the review bucket and won't resurface. Deliberately does NOT run the
+    /// habit-incrementing completion path (you didn't actually do it).
+    private func skipSession(_ event: Event) {
+        event.status = .completed
+        NotificationService().cancelEventNotifications(for: event)
+        try? context.save()
+        WidgetSync.refresh()
+    }
+
+    /// Drop: remove this work from the plan. Shrinks the matching unit's estimate
+    /// (and the plan's needed-minutes) by the session's length so the cushion and
+    /// future weeks reflect the smaller scope, then deletes the session.
+    private func dropSession(_ event: Event, plan: ProjectPlan) {
+        let minutes = max(0, Int(event.duration / 60))
+        if let key = event.workUnitID, let unit = plan.workUnits.first(where: { $0.unitKey == key }) {
+            unit.estimatedMinutes = max(0, unit.estimatedMinutes - minutes)
+        }
+        plan.neededMinutes = max(0, plan.neededMinutes - minutes)
+        NotificationService().cancelEventNotifications(for: event)
+        context.delete(event)
+        try? context.save()
+        WidgetSync.refresh()
+    }
+
+    /// Soonest free opening that fits `minutes`, clamped to now (the client
+    /// scheduler walks from the start of day and does not clamp itself).
+    private func soonestOpening(minutes: Int, prefs: UserPreferences) -> Date? {
+        let now = Date.now
+        let end = Calendar.current.date(byAdding: .day, value: 7, to: now) ?? now
+        let need = TimeInterval(minutes * 60)
+        let slots = SchedulerService().freeSlots(
+            duration: minutes, in: now...end, events: allEvents, preferences: prefs
+        )
+        return slots.compactMap { slot -> Date? in
+            let s = max(slot.start, now)
+            return slot.end.timeIntervalSince(s) >= need ? s : nil
+        }.min()
+    }
+
+    /// Delete-future / keep-past (user policy): remove upcoming pending sessions and
+    /// cancel their reminders; keep completed/past ones as history but unlink them so
+    /// nothing dangles at the deleted plan.
+    private func deletePlan(_ plan: ProjectPlan) {
+        let svc = NotificationService()
+        let now = Date.now
+        for event in allEvents where event.planID == plan.id {
+            if event.status == .pending && event.endTime >= now {
+                svc.cancelEventNotifications(for: event)
+                context.delete(event)
+            } else {
+                event.planID = nil
+                event.workUnitID = nil
+            }
+        }
+        context.delete(plan)
+        activePlanIDString = ""
+        feedbackDraft = ""
+        try? context.save()
+        WidgetSync.refresh()
     }
 
     @ViewBuilder
@@ -247,11 +430,10 @@ struct DeepPlannerView: View {
         selectedSessionIDs.removeAll()
     }
 
+    /// Genuine "I did this" — route through the canonical completion path so habit
+    /// increments and the Live Activity teardown stay consistent with everywhere else.
     private func markDone(_ event: Event) {
-        event.status = .completed
-        NotificationService().cancelEventNotifications(for: event)
-        try? context.save()
-        WidgetSync.refresh()
+        EventActionService.complete(event, context: context)
     }
 
     private func sessionTimeLabel(_ event: Event) -> String {
@@ -461,12 +643,23 @@ struct DeepPlannerView: View {
 
     private func insertSessions(_ sessions: [PlannedEventData], planID: UUID, prefs: UserPreferences) {
         let svc = NotificationService()
+        // Resolve categories once up front — the @Query array doesn't refresh
+        // mid-loop, so resolving per session would create duplicate rows for a
+        // brand-new category name shared across the week's sessions.
+        var resolved: [String: Category?] = [:]
         for session in sessions {
+            let category: Category?
+            if let cached = resolved[session.categoryName] {
+                category = cached
+            } else {
+                category = resolveOrCreateCategory(named: session.categoryName)
+                resolved[session.categoryName] = category
+            }
             let event = Event(
                 title: session.title,
                 startTime: session.start,
                 endTime: session.end,
-                category: resolveOrCreateCategory(named: session.categoryName),
+                category: category,
                 source: .ai
             )
             event.planID = planID

@@ -20,6 +20,24 @@ struct HabitSnapshot: Identifiable {
     let dailyGoal: Int
     let weekCount: Int
     let weeklyGoal: Int
+    let streak: Int
+    /// Streak is alive but today is an active day that hasn't been logged yet.
+    let streakAtRisk: Bool
+
+    init(id: UUID, name: String, symbolName: String, colorHex: String,
+         todayCount: Int, dailyGoal: Int, weekCount: Int, weeklyGoal: Int,
+         streak: Int = 0, streakAtRisk: Bool = false) {
+        self.id = id
+        self.name = name
+        self.symbolName = symbolName
+        self.colorHex = colorHex
+        self.todayCount = todayCount
+        self.dailyGoal = dailyGoal
+        self.weekCount = weekCount
+        self.weeklyGoal = weeklyGoal
+        self.streak = streak
+        self.streakAtRisk = streakAtRisk
+    }
 }
 
 /// Read-only access to the shared App Group SwiftData store for the
@@ -94,7 +112,9 @@ enum WidgetDataStore {
             todayCount: habit.count(),
             dailyGoal: habit.dailyGoal,
             weekCount: habit.weeklyTotal(),
-            weeklyGoal: habit.weeklyGoal
+            weeklyGoal: habit.weeklyGoal,
+            streak: habit.currentStreak,
+            streakAtRisk: habit.streakState == .atRisk
         )
     }
 }

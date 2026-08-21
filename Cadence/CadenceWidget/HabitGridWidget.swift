@@ -15,11 +15,14 @@ struct HabitGridProvider: AppIntentTimelineProvider {
             habits: [
                 .sample,
                 HabitSnapshot(id: UUID(), name: "Water", symbolName: "drop.fill", colorHex: "#52B4E0",
-                              todayCount: 5, dailyGoal: 8, weekCount: 40, weeklyGoal: 0),
+                              todayCount: 5, dailyGoal: 8, weekCount: 40, weeklyGoal: 0,
+                              streak: 6, streakAtRisk: false),
                 HabitSnapshot(id: UUID(), name: "Run", symbolName: "figure.run", colorHex: "#52C47A",
-                              todayCount: 1, dailyGoal: 1, weekCount: 4, weeklyGoal: 5),
+                              todayCount: 1, dailyGoal: 1, weekCount: 4, weeklyGoal: 5,
+                              streak: 21, streakAtRisk: false),
                 HabitSnapshot(id: UUID(), name: "Journal", symbolName: "pencil", colorHex: "#E0A052",
-                              todayCount: 0, dailyGoal: 1, weekCount: 3, weeklyGoal: 7)
+                              todayCount: 0, dailyGoal: 1, weekCount: 3, weeklyGoal: 7,
+                              streak: 4, streakAtRisk: true)
             ],
             accentHex: WidgetTheme.accentHex
         )
@@ -86,13 +89,26 @@ struct HabitGridWidgetView: View {
         let color = Color(hex: habit.colorHex)
         let progress = habit.dailyGoal == 0 ? 0 : Double(habit.todayCount) / Double(habit.dailyGoal)
         return VStack(spacing: 3) {
-            ZStack {
-                ProgressRing(progress: progress, color: color, lineWidth: 3.5)
-                Image(systemName: habit.symbolName)
-                    .font(.caption2)
-                    .foregroundColor(color)
+            ZStack(alignment: .topTrailing) {
+                ZStack {
+                    ProgressRing(progress: progress, color: color, lineWidth: 3.5)
+                    Image(systemName: habit.symbolName)
+                        .font(.caption2)
+                        .foregroundColor(color)
+                }
+                .frame(width: 32, height: 32)
+
+                if habit.streak > 0 {
+                    HStack(spacing: 1) {
+                        Image(systemName: habit.streakAtRisk ? "flame" : "flame.fill")
+                            .font(.system(size: 7, weight: .bold))
+                        Text("\(habit.streak)")
+                            .font(.system(size: 8, weight: .bold))
+                    }
+                    .foregroundColor(habit.streakAtRisk ? .orange : color)
+                    .offset(x: 8, y: -3)
+                }
             }
-            .frame(width: 32, height: 32)
             HStack(spacing: 3) {
                 Text(habit.dailyGoal > 0 ? "\(habit.todayCount)/\(habit.dailyGoal)" : "\(habit.todayCount)")
                     .font(.caption2.weight(.bold))

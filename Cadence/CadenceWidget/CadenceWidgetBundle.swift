@@ -11,5 +11,6 @@ struct CadenceWidgetBundle: WidgetBundle {
         HabitWidget()
         HabitGridWidget()
         EventLiveActivity()
+        QuickTimerWidget()
     }
 }

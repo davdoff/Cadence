@@ -32,11 +32,17 @@ function planWeek({ plan, window, progress, weeklyHours, freeSlots, prefs }) {
   const remainingOf = (u) => u.estimatedMinutes - (scheduled.get(u.id) || 0);
   const exhausted = (u) => remainingOf(u) <= 0;
 
-  // New material is blocked inside the deadline's no-new-material zone; recall/
-  // review passes (which carry no such constraint) still run there.
-  const inDeadlineZone = (u) => {
+  // New material is blocked inside the deadline's no-new-material zone. The zone
+  // starts `n` days before the deadline; the whole window is blocked only when it
+  // begins inside the zone (used for selection), but placement also enforces a
+  // per-unit cutoff so a session can't land inside the zone even mid-window.
+  const zoneStart = (u) => {
     const n = u.constraints.notLastNDaysBeforeDeadline;
-    return n != null && plan.deadline != null && window.start >= plan.deadline.minus({ days: n });
+    return n != null && plan.deadline != null ? plan.deadline.minus({ days: n }).startOf("day") : null;
+  };
+  const inDeadlineZone = (u) => {
+    const cutoff = zoneStart(u);
+    return cutoff != null && window.start >= cutoff;
   };
 
   const eligible = (u) => {
@@ -66,7 +72,9 @@ function planWeek({ plan, window, progress, weeklyHours, freeSlots, prefs }) {
     while (alloc >= MIN_SESSION && budgetLeft >= MIN_SESSION) {
       const minutes = Math.min(alloc, MAX_SESSION, budgetLeft);
       if (minutes < MIN_SESSION) break;
-      sessions.push({ workUnitId: u.id, title: u.title, objective: u.objective, minutes });
+      // Per-unit cutoff: new-material units must not be placed inside the
+      // no-new-material zone even if the window started before it.
+      sessions.push({ workUnitId: u.id, title: u.title, objective: u.objective, minutes, cutoff: zoneStart(u) });
       alloc -= minutes;
       budgetLeft -= minutes;
     }
@@ -94,6 +102,8 @@ function placeSessions(sessions, freeSlots, buffer, categoryName) {
       for (const slot of slotsByDay.get(day)) {
         if (slot.end.diff(slot.cursor, "minutes").minutes >= session.minutes) {
           const start = slot.cursor;
+          // Respect a new-material unit's deadline cutoff — skip slots inside it.
+          if (session.cutoff && start >= session.cutoff) continue;
           const end = start.plus({ minutes: session.minutes });
           slot.cursor = end.plus({ minutes: buffer });
           placed = { start, end };

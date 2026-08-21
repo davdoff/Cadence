@@ -427,7 +427,7 @@ struct OverviewView: View {
                             Text("days").font(.caption).foregroundColor(.secondary)
                         }
                         HStack(spacing: 3) {
-                            Image(systemName: "flame.fill").foregroundColor(theme.accent)
+                            Image(systemName: best.streakSymbol).foregroundColor(theme.accent)
                             Image(systemName: best.symbolName)
                             Text(best.name)
                         }

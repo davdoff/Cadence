@@ -289,6 +289,9 @@ struct HabitCard: View {
     private var dailyDone:  Bool { habit.type == .good && habit.dailyGoal > 0 && todayCount >= habit.dailyGoal }
     private var weeklyDone: Bool { habit.weeklyGoal > 0 && habit.weeklyTotal() >= habit.weeklyGoal }
 
+    @State private var celebrating = false
+    @State private var celebrationTick = 0
+
     var body: some View {
         VStack(alignment: .leading, spacing: compact ? 0 : 10) {
             topRow
@@ -326,13 +329,10 @@ struct HabitCard: View {
                     .lineLimit(1)
                 if !compact {
                     if habit.type == .good {
-                        let s = habit.currentStreak
-                        Label(
-                            s > 0 ? "\(s) day streak" : "Start your streak today",
-                            systemImage: s > 0 ? "flame.fill" : "flame"
-                        )
-                        .font(.caption)
-                        .foregroundColor(s > 0 ? accent : .secondary)
+                        Label(habit.streakHeadline, systemImage: habit.streakSymbol)
+                            .font(.caption)
+                            .foregroundColor(habit.currentStreak > 0 ? accent : .secondary)
+                            .lineLimit(1)
                     } else {
                         Text("This week: \(habit.weeklyTotal())")
                             .font(.caption).foregroundColor(.secondary)
@@ -363,6 +363,7 @@ struct HabitCard: View {
 
                 Button {
                     withAnimation(.spring(duration: 0.2)) { habit.increment(); try? context.save() }
+                    celebrateIfGoalJustHit()
                     WidgetSync.refresh()
                 } label: {
                     Image(systemName: "plus.circle.fill")
@@ -370,6 +371,8 @@ struct HabitCard: View {
                         .foregroundStyle(tile.buttonGradient)
                 }
                 .buttonStyle(.plain)
+                .overlay(GoalBurstOverlay(color: accent, isActive: celebrating))
+                .sensoryFeedback(.success, trigger: celebrationTick)
             }
 
             // Detail chevron
@@ -381,6 +384,14 @@ struct HabitCard: View {
             }
             .buttonStyle(.plain)
         }
+    }
+
+    private func celebrateIfGoalJustHit() {
+        guard habit.type == .good, habit.dailyGoal > 0, habit.count() >= habit.dailyGoal else { return }
+        guard HabitCelebrationTracker.claimCelebration(habitID: habit.id) else { return }
+        celebrationTick += 1
+        celebrating = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { celebrating = false }
     }
 
     // Daily progress bar

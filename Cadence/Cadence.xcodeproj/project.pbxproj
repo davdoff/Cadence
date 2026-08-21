@@ -83,6 +83,7 @@
 				Models/Shared/EventActivityAttributes.swift,
 				Models/Shared/SharedModelContainer.swift,
 				Models/Shared/StopEventIntent.swift,
+				Models/Shared/TimerSettingsStore.swift,
 				Models/SupportingTypes.swift,
 				Models/UserPreferences.swift,
 			);

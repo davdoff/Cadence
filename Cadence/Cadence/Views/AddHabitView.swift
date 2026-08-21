@@ -17,6 +17,7 @@ struct AddHabitView: View {
     @State private var dailyGoal:  Int
     @State private var weeklyGoal: Int
     @State private var correlatedCategoryName: String?
+    @State private var activeDaysMask: Int
 
     init(editingHabit: Habit? = nil) {
         self.editingHabit = editingHabit
@@ -27,6 +28,7 @@ struct AddHabitView: View {
         _dailyGoal     = State(initialValue: editingHabit?.dailyGoal ?? 1)
         _weeklyGoal    = State(initialValue: editingHabit?.weeklyGoal ?? 0)
         _correlatedCategoryName = State(initialValue: editingHabit?.correlatedCategoryName)
+        _activeDaysMask = State(initialValue: editingHabit?.effectiveActiveDaysMask ?? Habit.allDaysMask)
     }
 
     private var isEditing: Bool { editingHabit != nil }
@@ -46,6 +48,7 @@ struct AddHabitView: View {
                         colorPickerCard
                         detailsCard
                         goalsCard
+                        scheduleCard
                         categoryCard
                     }
                     .padding()
@@ -225,6 +228,43 @@ struct AddHabitView: View {
         }
     }
 
+    // MARK: - Rest-day schedule
+
+    private var scheduleCard: some View {
+        cardContainer(title: "Active days") {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 6) {
+                    ForEach(Weekday.allCases) { day in
+                        let on = activeDaysMask & day.bit != 0
+                        Button {
+                            withAnimation(.spring(duration: 0.2)) { toggle(day) }
+                        } label: {
+                            Text(day.shortLabel)
+                                .font(.caption.weight(.semibold))
+                                .foregroundColor(on ? .white : .secondary)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 34)
+                                .background(on ? AnyShapeStyle(tile.buttonGradient) : AnyShapeStyle(theme.chipBg))
+                                .clipShape(RoundedRectangle(cornerRadius: 9))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                Text(activeDaysMask == Habit.allDaysMask
+                     ? "Every day counts toward the streak."
+                     : "Days you switch off are rest days — they never break your streak.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+    }
+
+    private func toggle(_ day: Weekday) {
+        let next = activeDaysMask ^ day.bit
+        // Every day off would mean the streak can never advance.
+        activeDaysMask = next == 0 ? activeDaysMask : next
+    }
+
     // MARK: - Category link
 
     private var categoryCard: some View {
@@ -279,6 +319,7 @@ struct AddHabitView: View {
             habit.tileColorID = selectedTileID
             habit.dailyGoal = type == .good ? max(dailyGoal, 0) : 0
             habit.weeklyGoal = weeklyGoal
+            habit.activeDaysMask = activeDaysMask
         } else {
             context.insert(Habit(
                 name: trimmed,
@@ -288,7 +329,8 @@ struct AddHabitView: View {
                 colorHex: solidHex,
                 tileColorID: selectedTileID,
                 dailyGoal: dailyGoal,
-                weeklyGoal: weeklyGoal
+                weeklyGoal: weeklyGoal,
+                activeDaysMask: activeDaysMask
             ))
         }
         try? context.save()

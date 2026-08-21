@@ -496,12 +496,13 @@ struct MealSchedulerService {
 | Today's Schedule | `TodaySchedule` | Medium | Day name + completed/total ring, next 3 events |
 | Daily Progress | `DailyProgress` | Small + circular accessory | Completed vs total events ring |
 | Next Meal | `NextMeal` | Small | Upcoming meal name and time |
-| Habit Goal | `Habit` | Small + circular accessory | One configurable habit: daily ring, weekly line, interactive + button |
-| Habit Grid | `HabitGrid` | Small | Up to 4 configurable habits, mini rings with + buttons |
+| Habit Goal | `Habit` | Small + circular accessory | One configurable habit: daily ring, streak flame, weekly line, interactive + button |
+| Habit Grid | `HabitGrid` | Small | Up to 4 configurable habits, mini rings + streak flames with + buttons |
 
 #### Interactivity & configuration
 - Habit widgets are configured via `AppIntentConfiguration` (`SelectHabitIntent` / `SelectHabitsIntent`, backed by `HabitEntity`); only good habits are offered
 - `IncrementHabitIntent` runs in the widget process: fetches the habit from the shared store, `increment()`, save, `reloadAllTimelines()`
+- Habit widgets show the **streak state** carried on `HabitSnapshot` (`streak`, `streakAtRisk`, computed in `WidgetDataStore` from `Habit.currentStreak` / `Habit.streakState`): a **filled flame** in the habit's colour = today already logged (safe), a **hollow orange flame** = streak alive but today not logged yet (at risk)
 
 #### Live Activity — running-event countdown (implemented)
 - When the user taps **Start** on an event (Today tab or the notification Start action), a Live Activity raises the countdown on the **Lock Screen + Dynamic Island** — the same `startedAt → finishAt` window the in-app timer uses, rendered with a self-updating `Text(timerInterval:)` (no pushes/updates).
@@ -522,7 +523,11 @@ struct MealSchedulerService {
 - Both types are tracked by **count**, not boolean — e.g. "went to gym 4 times", "smoked 3 times"
 - A habit can be **correlated to an event category by name** — when a matching event is marked as Completed, the habit count auto-increments; otherwise the user increments manually
 - Habits are **created and edited** through `AddHabitView` — a **long-press** on a habit card opens a context menu (View Details / Edit / Delete); Edit reuses the same sheet via `AddHabitView(editingHabit:)` and updates in place
-- Each habit shows a **graph of count over time** (daily/weekly view)
+- Each habit shows a **graph of count over time** (daily/weekly view) plus a **GitHub-style month heatmap** on `HabitDetailView` (`HabitMonthHeatmapView`, laid out by the pure `HabitHeatmapService` — month grid, four shading levels relative to the month's peak, month back/forward stepping)
+- **Streak semantics** — `Habit.currentStreak` is the run of consecutive *active* days with a log counting back from **yesterday**, plus today when today is logged; an unlogged today never zeroes it. `Habit.streakState` reports which of `.safe` (today logged) / `.atRisk` (today active + unlogged) / `.rest` (today is a scheduled rest day) / `.none` applies, and `Habit.streakHeadline` + `streakSymbol` (`Extensions/Habit+StreakDisplay.swift`) render it consistently everywhere: "12 days" vs "12 days — keep it alive today" vs "12 days — rest day" vs "Start your streak today"
+- **Best streak + milestone badges** — `Habit.bestStreak` is the longest historical run (same consecutive-active-day rule); `HabitDetailView`'s streak card shows current vs best side by side plus locked/earned badges at **7 / 30 / 100** days (`Habit.streakMilestones`, `earnedMilestones`)
+- **Rest-day schedule** — each habit carries an `activeDaysMask` weekday bitmask (`Weekday` enum, default = all seven days; an all-off mask falls back to every day). Days switched off in `AddHabitView`'s "Active days" card are skipped by the streak math instead of breaking it, and are dotted in the month heatmap
+- **Goal-hit celebration** — reaching the daily goal via a habit card's **+** fires a success haptic and a ring-burst/checkmark pop (`GoalBurstOverlay`), **once per habit per day** (`HabitCelebrationTracker`, backed by UserDefaults)
 - **Weekly habit message** — once a week the user receives a habit analysis:
   - Hardcoded threshold responses trigger automatically (e.g. streak broken, new personal best, bad habit spiking) — no API call, always fires
   - An optional **AI-generated analysis** is available on demand — user taps to generate, app makes a single API call with the week's habit data and returns a tailored insight; prompt details to be refined through experimentation
@@ -549,7 +554,12 @@ The planner is being rebuilt around a **rolling week-by-week loop** rather than 
 - **Intake detail + multiple plans (done):** the intake has an optional **"Anything else?"** detail field (scope limits, materials, timing) that flows through the already-plumbed `constraints` channel into the skeleton prompt and is stored on `ProjectPlan.detail`. The planner holds **multiple plans**: the plan title is a **switcher menu** (`DeepPlannerView`), the active selection persists via `@AppStorage("activePlanID")`, a newly generated plan becomes active automatically, and deleting the active plan falls back to the newest remaining.
 - **Manual session placement (done):** alongside the auto "Plan this week" button (which never places in the past — the server clamps the window to `now`), a **"Schedule a session myself"** button reuses the same `/v1/plan/week` call to identify the *next due* session, then opens a dedicated **`PlanSessionSchedulerView`** preset to the soonest free opening but fully adjustable — chips for the next openings / time-of-day jumps / duration, plus manual date + time. Saving inserts one `Event` linked to the plan (`planID` / `workUnitID` / `objective`); pressing it again advances to the following session (progress is recomputed from linked events). Openings are computed client-side via `SchedulerService.freeSlots` and **clamped to `now`** (the client scheduler, unlike the server, walks from the start of day).
 - **Edit / tweak sessions (done):** the plan card lists its scheduled sessions (today onward) in `DeepPlannerView`. Tapping one opens the standard **`AddEventView`** for manual time/title/category edits (the plan link + objective are preserved). A gallery-style **Select** mode multi-selects sessions; a per-row context menu offers *Edit / Mark done / Tweak with AI*. **AI tweak** (`PlanTweakSheet` → `POST /v1/plan/tweak`) is a small, cheap call on the **default Sonnet model** (not the Opus planner) that shares the plan's work units as context and edits selected sessions' **content only** — clarify a vague objective into concrete steps, mark work done, change duration, or apply a free-form instruction. Returns per-session edits (`{ ref, title?, objective?, durationMinutes?, done?, summary }`); the view applies them to the linked `Event`s (rescheduling reminders on a duration change, clearing them when marked done). "Mark done" is also a direct, zero-token action. Placement/date moves stay manual — the tweak never reschedules.
-- **Next:** a weekly review/progress card (completed vs. missed, feedback note) + deterministic missed-session repair, then multiturn clarify intake (`/v1/plan/intake`) + rebudget.
+- **Weekly review + per-session repair (done):** `PlanProgressService` (pure) buckets a plan's sessions into **upcoming / completed / missed** (missed = `.missed`, or `.pending` past its end). When a plan has missed sessions, `DeepPlannerView` shows a **weekly review card** — a done/upcoming/missed tally plus, per missed session, three deterministic actions: **Redo** (reschedule to the soonest opening, or hand to the manual scheduler if nothing fits — stays plan-linked), **Skip** (mark completed so it retires without resurfacing; deliberately does *not* run the habit-incrementing path since the work wasn't done), and **Drop** (shave the session's minutes off the work unit's estimate and the plan's needed-minutes, then delete it — cushion shrinks to match). A **feedback note** field persists on `ProjectPlan.feedbackNote` for the future rebudget. Accounting principle: because missed work is resolved per-session at review (not auto-rolled-forward), the weekly planner keeps counting *all* linked sessions as "covered" — the review actions are the only thing that reclassifies a missed session, which keeps re-tapping "Plan this week" from double-booking.
+- **Review-pass fixes (Fable review):** deleting a plan now **deletes future pending sessions + cancels their reminders and keeps/unlinks past ones** (no orphans/ghost reminders); genuine "mark done" (context menu + AI tweak `done`) routes through `EventActionService.complete` (habits + Live Activity stay consistent); `/v1/plan/week` clamps the window to the deadline and enforces a **per-unit no-new-material cutoff** so sessions can't leak past it mid-window; `insertSessions` resolves categories once (no duplicate rows); multi-select state clears on plan switch; `AddEventView` hides Repeats for plan sessions (a recurrence would spawn unlinked clones); parsers now reject dangling skeleton refs and tweak edits for unsent sessions (retry-once).
+- **Next:** multiturn clarify intake (`/v1/plan/intake`) + rebudget (Opus), consuming the feedback note.
+
+### 12. Siri / App Shortcuts (spike — `SIRI_PLAN.md`)
+Phase 0 spike proving hands-free, app-closed voice access to the existing AI assistant — no new brain, no server changes. `AskCadenceIntent` (app target, `Cadence/Intents/AskCadenceIntent.swift`) is a background `AppIntent` that takes a dictated question, passes it to the existing `AIService.interpret()` (`/v1/schedule/interpret`), and speaks back `readOnlyReply`/`interpretation`. Discoverable via one registered phrase ("Ask Cadence") in `CadenceShortcuts` (`AppShortcutsProvider`, `Cadence/Intents/CadenceShortcuts.swift`). **Read-only only** — no schedule mutations yet; see `SIRI_PLAN.md` for the phased plan (hardened read-only, then confirmed single-event mutations).
 
 ---
 
@@ -600,7 +610,7 @@ The server is **stateless and OS-blind**: every request carries `now` +
 | `POST /v1/habits/analysis` | Weekly habit insight (plain text) |
 | `POST /v1/project/plan` | Deep project phase breakdown (legacy phase model) |
 | `POST /v1/plan/skeleton` | **Deep planner** — thin whole-horizon skeleton (work units + objectives + hour estimates + spacing constraints) with cushion math. Runs on `claude-opus-4-8` + adaptive thinking + `effort:"high"` (quality over cost), unlike the Sonnet secretary routes. Spec: `deep-planner-plan.md` |
-| `POST /v1/plan/week` | **Deep planner — deterministic, no Claude call.** Selects the work units due in a week and packs them into free slots (`services/weeklyPlanner.js`). Window clamped to `now`. Spec: `deep-planner-plan.md` |
+| `POST /v1/plan/week` | **Deep planner — deterministic, no Claude call.** Selects the work units due in a week and packs them into free slots (`services/weeklyPlanner.js`). Window clamped to `now` **and to the deadline**, with a per-unit no-new-material cutoff (`notLastNDaysBeforeDeadline`). Spec: `deep-planner-plan.md` |
 | `POST /v1/plan/tweak` | **Deep planner** — small **content-only** edit of selected sessions (clarify objective / mark done / change duration / free-form). Runs on the **default Sonnet model** (cheap; shares the plan's work units as context), never the Opus planner. Returns `{ edits: [{ ref, title?, objective?, durationMinutes?, done?, summary }] }`. Does not reschedule. Spec: `deep-planner-plan.md` |
 | `POST /v1/calendar/ics` | **Deterministic — no Claude call.** Fetches an `.ics` feed URL (`webcal://` normalised) and expands it (RRULE/EXDATE/RDATE/RECURRENCE-ID, UTC/TZID/floating/all-day forms) into concrete event DTOs within a ≤ 90-day window. Stateless: the URL is re-sent on every sync, never stored or logged (secret feed URLs carry auth). Spec: `calendar-import.md` §4 |
 
@@ -967,7 +977,10 @@ Habit
 - name: String
 - type: HabitType // .good, .bad
 - correlatedCategoryName: String? // auto-increments when matching event is completed
-- countLog: [Date: Int] // date → count for that day
+- countLog: [String: Int] // "yyyy-MM-dd" → count for that day
+- symbolName / colorHex / tileColorID: String
+- dailyGoal / weeklyGoal: Int // 0 = no goal
+- activeDaysMask: Int // weekday bitmask, bit 0 = Sunday; default 127 = every day
 
 UserPreferences
 - workStartHour / workEndHour: Int
@@ -1017,6 +1030,8 @@ HabitSnapshot
 - id: UUID
 - name / symbolName / colorHex: String
 - todayCount / dailyGoal / weekCount / weeklyGoal: Int
+- streak: Int
+- streakAtRisk: Bool // streak alive but today (an active day) not logged yet
 ```
 
 ---

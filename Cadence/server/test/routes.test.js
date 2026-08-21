@@ -388,6 +388,69 @@ test("POST /v1/plan/week rejects a missing plan / empty window → 400", async (
   } finally { close(); }
 });
 
+test("POST /v1/plan/week keeps new material out of the deadline's no-new-material zone (per-unit cutoff)", async () => {
+  const { post, close } = boot(async () => "{}");
+  try {
+    // Deadline 3 days out; the unit reserves the last 2 days → new material may
+    // only land on 07-06. Even though the window runs a full week, nothing should
+    // be placed on/after 07-07.
+    const { status, body } = await post("/v1/plan/week", {
+      now: "2026-07-06T08:00:00+03:00", timezone: "Europe/Bucharest",
+      prefs: { workStartHour: 9, workEndHour: 18, bufferMinutes: 15 },
+      events: [], weeklyHours: 20,
+      plan: {
+        goalType: "study", deadline: "2026-07-09",
+        workUnits: [
+          { id: "W1", title: "New material", objective: "Summarise ch.1–5", estimatedMinutes: 480, archetype: "milestone",
+            constraints: { afterUnit: null, repeatOf: null, minGapDays: null, notLastNDaysBeforeDeadline: 2 } },
+        ],
+      },
+      window: { start: "2026-07-06T00:00:00+03:00", end: "2026-07-13T23:59:00+03:00" },
+      progress: [],
+    });
+    assert.equal(status, 200);
+    assert.ok(body.events.length > 0, "expected some sessions on the only allowed day");
+    for (const e of body.events) {
+      assert.match(e.start, /^2026-07-06/, `session ${e.start} leaked into the deadline zone`);
+    }
+  } finally { close(); }
+});
+
+test("POST /v1/plan/skeleton: a dangling repeatOf id twice → 502 AI_UNPARSEABLE", async () => {
+  const fake = async () => JSON.stringify({
+    title: "Bad refs",
+    workUnits: [
+      { id: "W1", title: "A", objective: "do a", estimatedMinutes: 60, archetype: "repetition",
+        constraints: { afterUnit: null, repeatOf: "W9", minGapDays: 2, notLastNDaysBeforeDeadline: null } },
+    ],
+  });
+  const { post, close } = boot(fake);
+  try {
+    const { status, body } = await post("/v1/plan/skeleton", {
+      now: BASE_REQ.now, timezone: BASE_REQ.timezone, goal: "x", goalType: "study", weeklyHours: 5,
+    });
+    assert.equal(status, 502);
+    assert.equal(body.error.code, "AI_UNPARSEABLE");
+  } finally { close(); }
+});
+
+test("POST /v1/plan/tweak: an edit for an unsent ref twice → 502 AI_UNPARSEABLE", async () => {
+  const fake = async () => JSON.stringify({
+    edits: [{ ref: "ghost", objective: "x", summary: "edited a session that wasn't sent" }],
+  });
+  const { post, close } = boot(fake);
+  try {
+    const { status, body } = await post("/v1/plan/tweak", {
+      now: BASE_REQ.now, timezone: BASE_REQ.timezone,
+      plan: { title: "X", goalType: "study", workUnits: [] },
+      sessions: [{ ref: "s1", title: "t", objective: "o", start: "2026-07-07T14:00:00+03:00", end: "2026-07-07T15:00:00+03:00" }],
+      instruction: "clarify",
+    });
+    assert.equal(status, 502);
+    assert.equal(body.error.code, "AI_UNPARSEABLE");
+  } finally { close(); }
+});
+
 test("POST /v1/plan/tweak edits selected sessions; shares plan context, uses the default (Sonnet) model", async () => {
   let seen;
   const fake = async (opts) => {

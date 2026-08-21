@@ -184,8 +184,9 @@ struct PlanTweakSheet: View {
             }
 
             if edit.done == true {
-                event.status = .completed
-                svc.cancelEventNotifications(for: event)   // no reminders for finished work
+                // Genuine completion — go through the canonical path so correlated
+                // habits increment and the Live Activity tears down consistently.
+                EventActionService.complete(event, context: context)
             }
 
             summaries.append("\(event.title): \(edit.summary)")

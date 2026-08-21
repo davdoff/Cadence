@@ -171,6 +171,15 @@ struct SettingsView: View {
                         Label("Import calendars", systemImage: "calendar.badge.plus")
                     }
                 }
+
+                // Quick Timer (standalone widget, not tied to app data)
+                Section("Quick Timer") {
+                    NavigationLink {
+                        QuickTimerSettingsView()
+                    } label: {
+                        Label("Edit timer presets", systemImage: "timer")
+                    }
+                }
             }
             .scrollContentBackground(.hidden)
         }

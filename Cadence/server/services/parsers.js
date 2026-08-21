@@ -260,40 +260,52 @@ const idOrNull = (v) => (typeof v === "string" && v.length > 0 ? v : null);
 function parsePlanSkeleton(text) {
   const raw = parseJSON(text);
   if (!Array.isArray(raw.workUnits) || raw.workUnits.length === 0) fail("skeleton response without workUnits");
-  return {
-    title: str(raw.title, "title"),
-    workUnits: raw.workUnits.map((u, i) => {
-      if (!PLAN_ARCHETYPES.has(u?.archetype)) fail(`workUnits[${i}].archetype must be "milestone" or "repetition"`);
-      if (!Number.isInteger(u?.estimatedMinutes) || u.estimatedMinutes <= 0) {
-        fail(`workUnits[${i}].estimatedMinutes must be a positive integer`);
-      }
-      const c = u?.constraints ?? {};
-      return {
-        id: str(u?.id, `workUnits[${i}].id`),
-        title: str(u?.title, `workUnits[${i}].title`),
-        objective: str(u?.objective, `workUnits[${i}].objective`),
-        estimatedMinutes: u.estimatedMinutes,
-        archetype: u.archetype,
-        constraints: {
-          afterUnit: idOrNull(c.afterUnit),
-          repeatOf: idOrNull(c.repeatOf),
-          minGapDays: intOrNull(c.minGapDays),
-          notLastNDaysBeforeDeadline: intOrNull(c.notLastNDaysBeforeDeadline),
-        },
-      };
-    }),
-  };
+  const workUnits = raw.workUnits.map((u, i) => {
+    if (!PLAN_ARCHETYPES.has(u?.archetype)) fail(`workUnits[${i}].archetype must be "milestone" or "repetition"`);
+    if (!Number.isInteger(u?.estimatedMinutes) || u.estimatedMinutes <= 0) {
+      fail(`workUnits[${i}].estimatedMinutes must be a positive integer`);
+    }
+    const c = u?.constraints ?? {};
+    return {
+      id: str(u?.id, `workUnits[${i}].id`),
+      title: str(u?.title, `workUnits[${i}].title`),
+      objective: str(u?.objective, `workUnits[${i}].objective`),
+      estimatedMinutes: u.estimatedMinutes,
+      archetype: u.archetype,
+      constraints: {
+        afterUnit: idOrNull(c.afterUnit),
+        repeatOf: idOrNull(c.repeatOf),
+        minGapDays: intOrNull(c.minGapDays),
+        notLastNDaysBeforeDeadline: intOrNull(c.notLastNDaysBeforeDeadline),
+      },
+    };
+  });
+  // afterUnit / repeatOf must reference a real unit — a dangling id would make a
+  // unit permanently unschedulable in the weekly planner. Catch it here so the
+  // retry-once rule can recover at skeleton time rather than failing silently later.
+  const ids = new Set(workUnits.map((u) => u.id));
+  workUnits.forEach((u, i) => {
+    const { afterUnit, repeatOf } = u.constraints;
+    if (afterUnit != null && !ids.has(afterUnit)) fail(`workUnits[${i}].constraints.afterUnit "${afterUnit}" references no unit`);
+    if (repeatOf != null && !ids.has(repeatOf)) fail(`workUnits[${i}].constraints.repeatOf "${repeatOf}" references no unit`);
+  });
+  return { title: str(raw.title, "title"), workUnits };
 }
 
 // Per-session edits: ref + summary are required; every other field is present
 // only when the model actually changed it (omitted ones stay untouched client-side).
-function parsePlanTweak(text) {
+function parsePlanTweak(text, { knownRefs } = {}) {
   const raw = parseJSON(text);
   if (!Array.isArray(raw.edits)) fail("tweak response without an edits array");
+  const allowed = knownRefs ? new Set(knownRefs) : null;
   return {
     edits: raw.edits.map((e, i) => {
+      const ref = str(e?.ref, `edits[${i}].ref`);
+      // An edit must target a session that was actually sent, else the client
+      // would silently drop it (no error, no summary shown). Fail → retry-once.
+      if (allowed && !allowed.has(ref)) fail(`edits[${i}].ref "${ref}" is not a selected session`);
       const edit = {
-        ref: str(e?.ref, `edits[${i}].ref`),
+        ref,
         summary: str(e?.summary, `edits[${i}].summary`),
       };
       if (typeof e?.title === "string" && e.title.length > 0) edit.title = e.title;

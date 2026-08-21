@@ -19,6 +19,42 @@ enum ThemeMode: String, CaseIterable, Identifiable, Codable {
     var id: String { rawValue }
 }
 
+/// Day-of-week identity for a habit's rest-day schedule. Raw values match
+/// `Calendar.component(.weekday)` (1 = Sunday … 7 = Saturday) and are persisted
+/// as a bitmask on `Habit.activeDaysMask` — shared with the widget target, so
+/// never reorder.
+enum Weekday: Int, CaseIterable, Identifiable, Codable {
+    case sunday = 1, monday, tuesday, wednesday, thursday, friday, saturday
+
+    var id: Int { rawValue }
+    var bit: Int { 1 << (rawValue - 1) }
+
+    var shortLabel: String {
+        switch self {
+        case .sunday:    "S"
+        case .monday:    "M"
+        case .tuesday:   "T"
+        case .wednesday: "W"
+        case .thursday:  "T"
+        case .friday:    "F"
+        case .saturday:  "S"
+        }
+    }
+}
+
+/// Where a habit's streak stands *right now*, so UI can distinguish a streak
+/// that is safe from one that still needs today's log.
+enum HabitStreakState {
+    /// No streak running.
+    case none
+    /// Today is already logged.
+    case safe
+    /// Streak is alive but today is an active day that hasn't been logged yet.
+    case atRisk
+    /// Today is a scheduled rest day — the streak carries over untouched.
+    case rest
+}
+
 struct HabitDayEntry: Identifiable {
     let id: Date
     let date: Date

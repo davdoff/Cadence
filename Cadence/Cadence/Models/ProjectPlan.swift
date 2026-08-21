@@ -29,6 +29,7 @@ final class ProjectPlan {
     var createdAt: Date
     var weeklyHours: Int = 6     // committed hours/week — the weekly budget (inline default for migration)
     var detail: String = ""      // extra context/constraints from intake (scope, materials, timing) — inline default for migration
+    var feedbackNote: String = "" // rolling note from weekly reviews; feeds the future rebudget (inline default for migration)
     // Cushion snapshot from the last skeleton/rebudget, in minutes.
     var neededMinutes: Int
     var availableMinutes: Int

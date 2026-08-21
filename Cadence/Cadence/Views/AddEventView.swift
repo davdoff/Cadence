@@ -109,9 +109,12 @@ struct AddEventView: View {
                         }
                     }
 
-                    // Imported events mirror their source calendar's rule,
-                    // so recurrence isn't editable from here.
-                    if editingEvent?.source != .imported {
+                    // Imported events mirror their source calendar's rule, so
+                    // recurrence isn't editable from here. Deep-planner sessions
+                    // hide it too — a repeat would spawn clones that don't carry
+                    // the plan link (planID/workUnitID/objective) and so wouldn't
+                    // count toward the plan.
+                    if editingEvent?.source != .imported && editingEvent?.planID == nil {
                         Section("Repeats") {
                             Picker("Repeats", selection: $repeatChoice) {
                                 ForEach(RepeatChoice.allCases) { choice in

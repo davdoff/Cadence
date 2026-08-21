@@ -10,7 +10,8 @@ struct HabitEntry: TimelineEntry {
 extension HabitSnapshot {
     static var sample: HabitSnapshot {
         HabitSnapshot(id: UUID(), name: "Read", symbolName: "book.fill", colorHex: "#5278E0",
-                      todayCount: 2, dailyGoal: 3, weekCount: 12, weeklyGoal: 20)
+                      todayCount: 2, dailyGoal: 3, weekCount: 12, weeklyGoal: 20,
+                      streak: 12, streakAtRisk: false)
     }
 }
 
@@ -92,6 +93,9 @@ struct HabitWidgetView: View {
                 Text(habit.name)
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(2)
+                if habit.streak > 0 {
+                    streakBadge(habit, color: color)
+                }
                 Text(weeklyLine(habit))
                     .font(.caption2)
                     .foregroundColor(.secondary)
@@ -141,6 +145,18 @@ struct HabitWidgetView: View {
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
         }
+    }
+
+    /// A hollow flame plus a warning tint marks a streak that today has not yet
+    /// secured; a filled flame means today is already logged.
+    private func streakBadge(_ habit: HabitSnapshot, color: Color) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: habit.streakAtRisk ? "flame" : "flame.fill")
+                .font(.system(size: 10, weight: .semibold))
+            Text("\(habit.streak)")
+                .font(.caption2.weight(.bold))
+        }
+        .foregroundColor(habit.streakAtRisk ? .orange : color)
     }
 
     private func dailyProgress(_ habit: HabitSnapshot) -> Double {

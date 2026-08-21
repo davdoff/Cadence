@@ -23,8 +23,10 @@ struct HabitDetailView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     todayCard
+                    if habit.type == .good { streakCard }
                     if habit.weeklyGoal > 0 { weeklyGoalCard }
                     chartCard
+                    HabitMonthHeatmapView(habit: habit, color: accent)
                     if !weeklyMessages.isEmpty { insightsCard }
                     aiAnalysisCard
                 }
@@ -125,9 +127,9 @@ struct HabitDetailView: View {
             Divider()
             if habit.type == .good {
                 HStack {
-                    Label(streakLabel, systemImage: "flame.fill")
+                    Label(habit.streakHeadline, systemImage: habit.streakSymbol)
                         .font(.subheadline.weight(.medium))
-                        .foregroundColor(accent)
+                        .foregroundColor(habit.currentStreak > 0 ? accent : .secondary)
                     Spacer()
                     Text("This week: \(habit.weeklyTotal())")
                         .font(.caption).foregroundColor(.secondary)
@@ -147,6 +149,83 @@ struct HabitDetailView: View {
         .background(theme.cardSurface)
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .shadow(color: accent.opacity(0.08), radius: 6, y: 2)
+    }
+
+    // MARK: - Streak card
+
+    private var streakCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 0) {
+                streakStat(value: habit.currentStreak, label: "Current", symbol: habit.streakSymbol)
+                Rectangle().fill(theme.deep).frame(width: 1, height: 40)
+                streakStat(value: habit.bestStreak, label: "Best", symbol: "trophy.fill")
+            }
+
+            Text(streakStatusLine)
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+            if !habit.isEveryDaySchedule {
+                Label(scheduleLine, systemImage: "calendar")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            if !Habit.streakMilestones.isEmpty {
+                HStack(spacing: 8) {
+                    ForEach(Habit.streakMilestones, id: \.self) { milestone in
+                        milestoneBadge(milestone)
+                    }
+                    Spacer()
+                }
+            }
+        }
+        .padding()
+        .cardStyle()
+    }
+
+    private func streakStat(value: Int, label: String, symbol: String) -> some View {
+        VStack(spacing: 4) {
+            HStack(spacing: 5) {
+                Image(systemName: symbol).font(.footnote)
+                Text("\(value)").font(.cadNumber(30)).contentTransition(.numericText())
+            }
+            .foregroundColor(value > 0 ? accent : .secondary)
+            Text(label).font(.caption2).foregroundColor(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func milestoneBadge(_ milestone: Int) -> some View {
+        let earned = habit.earnedMilestones.contains(milestone)
+        return VStack(spacing: 3) {
+            ZStack {
+                Circle()
+                    .fill(earned ? AnyShapeStyle(tile.buttonGradient) : AnyShapeStyle(theme.deep))
+                    .frame(width: 38, height: 38)
+                Image(systemName: earned ? "rosette" : "lock.fill")
+                    .font(.system(size: earned ? 17 : 12, weight: .semibold))
+                    .foregroundColor(earned ? .white : .secondary)
+            }
+            Text("\(milestone)d")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(earned ? accent : .secondary)
+        }
+        .opacity(earned ? 1 : 0.55)
+    }
+
+    private var streakStatusLine: String {
+        switch habit.streakState {
+        case .none:   return "Log it today to start a new run."
+        case .safe:   return "Today is logged — the streak is safe."
+        case .atRisk: return "Today isn't logged yet — one log keeps the run alive."
+        case .rest:   return "Today is a scheduled rest day — your run carries over."
+        }
+    }
+
+    private var scheduleLine: String {
+        let days = Weekday.allCases.filter { habit.activeDays.contains($0) }
+        return "Active on " + days.map(\.shortLabel).joined(separator: " ")
     }
 
     // MARK: - Weekly goal card
@@ -251,13 +330,12 @@ struct HabitDetailView: View {
     private var weeklyMessages: [String] {
         var msgs: [String] = []
         let today      = habit.count()
-        let yesterday  = habit.count(for: Calendar.current.date(byAdding: .day, value: -1, to: .now) ?? .now)
         let weekTotal  = habit.weeklyTotal()
         let priorTotal = habit.priorWeeklyTotal()
         let streak     = habit.currentStreak
 
         if habit.type == .good {
-            if yesterday > 0 && today == 0    { msgs.append("Streak broken — jump back in today to rebuild your run.") }
+            if streak > 0 && habit.streakState == .atRisk { msgs.append("\(streak)-day streak on the line — log it today to keep it.") }
             if streak >= 7                     { msgs.append("\(streak)-day streak — you're building a real routine.") }
             if priorTotal > 0 && weekTotal > priorTotal { msgs.append("Up from \(priorTotal) last week to \(weekTotal) this week — solid progress.") }
         } else {
@@ -323,13 +401,6 @@ struct HabitDetailView: View {
     }
 
     // MARK: - Helpers
-
-    private var streakLabel: String {
-        let s = habit.currentStreak
-        if s == 0 { return "No streak yet" }
-        if s == 1 { return "1-day streak" }
-        return "\(s)-day streak"
-    }
 
     private func runAnalysis() {
         isAnalyzing = true; analysisError = nil
