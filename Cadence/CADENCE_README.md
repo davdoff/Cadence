@@ -864,6 +864,14 @@ Widget Extension (WidgetKit — reads from shared AppGroup store)
 ### Key Design Rule
 **Do local logic first.** Only escalate to Claude API when the task requires language understanding or preference-based reasoning. Free slot detection, basic conflict checking, stats generation, habit threshold responses, notification scheduling, and widget data writing — all local.
 
+### Quick Timer (standalone, personal utility)
+A 5-preset countdown widget that rings a real AlarmKit alarm (iOS 26+, falls back
+to a notification below that), plus a "Quick Timer" section in Settings. It is
+**deliberately isolated** — no ties to `Event`, `Habit`, `Meal`, or the AI layer,
+and it is not part of the product spec above. Full writeup and safe-removal steps
+live in `CADENCE_WIDGET_TIMERS.md`; treat it as opt-out scaffolding, not a
+feature to build on.
+
 ---
 
 ## CI/CD Environment

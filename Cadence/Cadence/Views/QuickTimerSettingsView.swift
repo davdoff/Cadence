@@ -1,6 +1,5 @@
 import SwiftUI
 import UIKit
-import UserNotifications
 import WidgetKit
 
 // Standalone Quick Timer feature — see CADENCE_WIDGET_TIMERS.md.
@@ -75,7 +74,7 @@ struct QuickTimerSettingsView: View {
                         }
                     }
                 } footer: {
-                    Text("These 5 presets show as buttons on the Quick Timer widget. It's standalone — not connected to your events, meals, or habits.")
+                    Text(footerText)
                         .font(.caption)
                 }
             }
@@ -85,13 +84,12 @@ struct QuickTimerSettingsView: View {
         .navigationTitle("Quick Timer")
         .navigationBarTitleDisplayMode(.large)
         .toolbarBackground(theme.background, for: .navigationBar)
-        .onAppear {
-            slots = TimerSettingsStore.slotsSeconds()
-            // The timer rings via a local notification, so it needs its own
-            // permission — this feature stays usable even if event reminders
-            // are switched off.
-            UNUserNotificationCenter.current()
-                .requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        .onAppear { slots = TimerSettingsStore.slotsSeconds() }
+        .task {
+            // The alarm needs its own permission (AlarmKit on iOS 26+, otherwise
+            // notifications), so the feature stays usable even if event
+            // reminders are switched off.
+            await QuickTimer.requestAuthorization()
         }
         // onDismiss covers swipe-to-dismiss too, not just the Done button.
         .sheet(item: $editing, onDismiss: save) { selection in
@@ -115,6 +113,13 @@ struct QuickTimerSettingsView: View {
             }
         }
         .presentationDetents([.medium])
+    }
+
+    private var footerText: String {
+        let base = "These 5 presets show as buttons on the Quick Timer widget. It's standalone — not connected to your events, meals, or habits."
+        return QuickTimer.usesRealAlarm
+            ? base + "\n\nTimers ring as a real alarm — they'll sound even on Silent."
+            : base + "\n\nThis device is below iOS 26, so timers ring as a normal notification and stay silent on Silent Mode."
     }
 
     private func save() {

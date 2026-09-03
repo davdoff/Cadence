@@ -81,6 +81,8 @@
 				Models/ProjectPlan.swift,
 				Models/Shared/AppGroup.swift,
 				Models/Shared/EventActivityAttributes.swift,
+				Models/Shared/QuickTimerIntents.swift,
+				Models/Shared/QuickTimerScheduler.swift,
 				Models/Shared/SharedModelContainer.swift,
 				Models/Shared/StopEventIntent.swift,
 				Models/Shared/TimerSettingsStore.swift,

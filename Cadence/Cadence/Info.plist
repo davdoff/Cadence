@@ -17,6 +17,8 @@
 	</array>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
+	<key>NSAlarmKitUsageDescription</key>
+	<string>Cadence uses alarms so your Quick Timer countdowns ring even when your phone is on Silent.</string>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Cadence reads your existing calendars so it can schedule around your commitments and avoid conflicts. You choose which calendars to import.</string>
 	<key>UIAppFonts</key>

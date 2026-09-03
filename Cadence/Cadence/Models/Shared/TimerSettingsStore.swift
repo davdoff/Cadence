@@ -11,6 +11,7 @@ enum TimerSettingsStore {
 
     private static let slotsKey = "quickTimerSlotsSeconds"
     private static let endDateKey = "quickTimerEndDate"
+    private static let alarmIDKey = "quickTimerAlarmID"
     private static let notificationID = "quickTimerAlarm"
 
     static var notificationIdentifier: String { notificationID }
@@ -49,9 +50,21 @@ enum TimerSettingsStore {
 
     // MARK: - Running state
 
+    /// Mirror of the running timer, kept only so the *home-screen* widget can
+    /// draw its own countdown. AlarmKit owns the real alarm (and the Lock Screen
+    /// / Dynamic Island UI); this is a display cache, not the source of truth.
     static var endDate: Date? {
         get { AppGroup.defaults?.object(forKey: endDateKey) as? Date }
         set { AppGroup.defaults?.set(newValue, forKey: endDateKey) }
+    }
+
+    /// Id of the scheduled AlarmKit alarm, so Cancel/Stop can target it.
+    static var activeAlarmID: UUID? {
+        get {
+            guard let raw = AppGroup.defaults?.string(forKey: alarmIDKey) else { return nil }
+            return UUID(uuidString: raw)
+        }
+        set { AppGroup.defaults?.set(newValue?.uuidString, forKey: alarmIDKey) }
     }
 
     static var isRunning: Bool {
@@ -59,11 +72,13 @@ enum TimerSettingsStore {
         return end > .now
     }
 
-    static func start(seconds: TimeInterval) {
+    static func start(seconds: TimeInterval, alarmID: UUID) {
         endDate = Date().addingTimeInterval(seconds)
+        activeAlarmID = alarmID
     }
 
     static func cancel() {
         endDate = nil
+        activeAlarmID = nil
     }
 }
