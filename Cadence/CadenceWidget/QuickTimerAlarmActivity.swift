@@ -67,20 +67,21 @@ struct QuickTimerAlarmActivity: Widget {
         .padding()
     }
 
-    /// The live countdown, or a done/paused label. `.countdown` carries the fire
-    /// date, so `Text(timerInterval:)` keeps ticking without timeline reloads.
+    /// The live countdown, or a done/paused label. The `.countdown` payload
+    /// carries the fire date, so `Text(timerInterval:)` keeps ticking without
+    /// timeline reloads.
     private func statusText(_ context: ActivityViewContext<AlarmAttributes<QuickTimerMetadata>>) -> Text {
         switch context.state.mode {
-        case .countdown(let fireDate):
+        case .countdown(let countdown):
             // Guard the range: an entry rendered after the fire date would
             // otherwise build an inverted ClosedRange and trap.
             let now = Date.now
-            return fireDate > now
-                ? Text(timerInterval: now...fireDate, countsDown: true)
+            return countdown.fireDate > now
+                ? Text(timerInterval: now...countdown.fireDate, countsDown: true)
                 : Text("Timer done")
         case .paused:
             return Text("Paused")
-        case .alerting:
+        case .alert:
             return Text("Timer done")
         @unknown default:
             return Text("Quick Timer")

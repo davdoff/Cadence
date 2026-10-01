@@ -39,11 +39,24 @@ struct QuickTimerMetadata: AlarmMetadata {
 struct AlarmKitTimerScheduler: QuickTimerScheduling {
 
     func start(seconds: TimeInterval, id: UUID) async throws {
-        // Minimal presentation: a countdown with no pause, and an alert whose
-        // Stop button the system supplies for us (the `stopButton:` initialiser
-        // is deprecated precisely because of that).
+        // Minimal presentation: a countdown with no pause, and an alert with
+        // just a Stop button. From iOS 26.1 the system supplies that button
+        // itself, so the initialiser taking one is deprecated there — but it is
+        // the only one that exists on 26.0, hence the branch.
+        let alert: AlarmPresentation.Alert
+        if #available(iOS 26.1, *) {
+            alert = .init(title: "Timer done", secondaryButton: nil, secondaryButtonBehavior: nil)
+        } else {
+            alert = .init(
+                title: "Timer done",
+                stopButton: AlarmButton(text: "Stop", textColor: .white, systemImageName: "stop.fill"),
+                secondaryButton: nil,
+                secondaryButtonBehavior: nil
+            )
+        }
+
         let presentation = AlarmPresentation(
-            alert: .init(title: "Timer done", secondaryButton: nil, secondaryButtonBehavior: nil),
+            alert: alert,
             countdown: .init(title: "Quick Timer", pauseButton: nil),
             paused: nil
         )
