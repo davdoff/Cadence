@@ -26,7 +26,8 @@ and without quietly making quality worse.
 - There is a **minimum cacheable prefix** below which caching silently does not
   happen — no error, just `cache_creation_input_tokens: 0`. It is
   **model-dependent and not monotonic across generations**: 512 tokens on
-  Opus 5, 1024 on Sonnet 5. Check it before assuming a prompt caches.
+  Opus 5 and Sonnet 5.5, 1024 on Sonnet 5. Check it before assuming a prompt
+  caches.
 - The prefix must be **byte-for-byte identical**. Whitespace, a reordered
   preference, an interpolated timestamp — any of those is a miss.
 
@@ -85,9 +86,9 @@ Which prompts actually clear the floor today:
 
 | Prompt | ~tokens | Model | Floor | Caches? |
 |---|---:|---|---:|---|
-| `interpret` | ~2,250 | Sonnet 5 | 1024 | **yes** |
+| `interpret` | ~2,250 | Sonnet 5.5 | 512 | **yes** |
 | `planSkeleton` | ~700 | Opus 5 | 512 | **yes** |
-| `planTweak`, `generate`, `mealSuggestion`, `scheduling`, `projectPlan`, `habit` | 110–420 | Sonnet 5 | 1024 | no (below floor) |
+| `planTweak`, `generate`, `mealSuggestion`, `scheduling`, `projectPlan`, `habit` | 110–420 | Sonnet 5.5 | 512 | no (below floor) |
 
 `interpret` is the one that matters: it is both the longest prompt and by far the
 most-called route.
@@ -96,20 +97,24 @@ most-called route.
 
 The tempting optimisation is the opposite of caching: since `interpret` describes
 all ten intents, let the user pre-select one and send a smaller prompt. **Don't.**
-The arithmetic goes the wrong way, on Sonnet 5 ($2/MTok input, $0.20 cache read,
-$2.50 cache write), counting system-prompt tokens only:
+On Sonnet 5.5 ($2/MTok input, $0.20 cache read, $2.50 cache write), counting
+system-prompt tokens only:
 
 | | per call |
 |---|---:|
 | Full prompt, cache hit (~2,250 tok) | **$0.00045** |
 | Full prompt, cold | $0.0045 |
-| Trimmed single-intent prompt (~850 tok), uncached | **$0.0017** |
+| Trimmed single-intent prompt (~850 tok), uncached | $0.0017 |
+| Trimmed single-intent prompt (~850 tok), cache hit | $0.00017 |
 
-The cached fat prompt is ~4× cheaper than the trimmed thin one. Worse: an
-850-token prompt is *below Sonnet 5's 1024-token floor*, so it could never cache
-at all — trimming the prompt would destroy the ability to cache it. And ten
-per-intent prompts means ten cold prefixes each with its own 5-minute window,
-instead of one that every user keeps warm.
+On Sonnet 5 (1024-token floor) the trimmed prompt could never cache, so the
+fat cached prompt won outright. On Sonnet 5.5 the floor is 512, so a trimmed
+prompt *can* cache, and a warm one is cheaper by about $0.0003 a call. That is
+not worth it: ten per-intent prompts means ten separate prefixes, each with its
+own 5-minute window, so with light traffic most of them are cold most of the
+time — and a cold trimmed prompt ($0.0017) costs ~4× a warm fat one. It would
+also split the disambiguation rules that only make sense side by side across
+ten prompts.
 
 Related invariant: **never branch the system prompt on a request field.** Each
 flag combination is a distinct prefix. Conditional system sections are a
@@ -175,15 +180,29 @@ under either hint. That keeps a mis-set toggle visible instead of silently wrong
 
 | Route group | Was | Now | Why |
 |---|---|---|---|
-| secretary (`MODEL`) | `claude-sonnet-4-6` ($3/$15) | `claude-sonnet-5` ($2/$10) | ~33% cheaper, newer, same 1024 cache floor |
+| secretary (`MODEL`) | `claude-sonnet-4-6` ($3/$15) | `claude-sonnet-5-5` ($2/$10) | cheaper per token, current Sonnet, and the cache floor drops 1024 → 512 |
 | deep planner (`OPUS`) | `claude-opus-4-8` | `claude-opus-5` | same $5/$25, and **halves** the cache floor 1024 → 512, which is what makes `planSkeleton` cacheable |
 
-This model bump was a larger, simpler win than either caching or the hint — worth
-re-checking whenever a new generation ships. `budget_tokens` is removed on both
-(a 400); adaptive thinking is on by default on Opus 5 but `plan/skeleton` still
+Per-token price is not the whole story: the Sonnet 5 generation's tokenizer
+produces roughly 30% more tokens for the same text than Sonnet 4.6, so the real
+per-request saving is nearer 13% than 33%. Worth re-checking whenever a new
+generation ships. `budget_tokens` is removed on both (a 400); adaptive thinking is on by default on Opus 5 but `plan/skeleton` still
 sets it explicitly so the intent reads clearly. The route test asserts
 `seen.model === OPUS` rather than a literal id, so a future bump doesn't fail a
 test for the wrong reason.
+
+**Thinking is on everywhere, at low effort by default.** Sonnet 4.6 answered
+without thinking unless asked; Sonnet 5 and 5.5 think by default, at `high`
+effort, and Sonnet 5.5 rejects `{type: "disabled"}` outright. David chose to keep
+thinking for smarter answers and tune its depth instead: `callClaude` always
+sends `thinking: {type: "adaptive"}` and `output_config.effort`, defaulting to
+`"low"` (`DEFAULT_EFFORT`). `/v1/schedule/generate` passes `"medium"` — filling
+a period means trading goals off across many slots, where more thought pays.
+The deep planner keeps its own `"high"`. Note that a `generate` *intent* inside
+`interpret` runs at `low`, because interpret is one call whose intent isn't
+known until the answer comes back. Thinking tokens bill as output ($10/MTok on
+Sonnet 5.5), which is the main reason effort stays low by default; `out=` in
+the usage log includes them.
 
 Not adopted: the server-side refusal `fallbacks` parameter. Opus 5's safety
 classifiers target research-biology and cybersecurity content; a scheduling app
@@ -193,9 +212,11 @@ is an honest failure.
 
 ### `max_tokens` and truncation
 
-`MAX_TOKENS` 2048 → **4096**. A generated week of events runs past 2048, and a
-truncated response is pure waste — output bills by actual tokens produced, so a
-higher ceiling costs nothing when it isn't used.
+`MAX_TOKENS` 2048 → **16000**. The cap covers thinking *and* the answer, a
+generated week of events alone runs past 2048, and a truncated response is pure
+waste — output bills by actual tokens produced, so a higher ceiling costs nothing
+when it isn't used. 16k keeps a non-streaming request inside the SDK's HTTP
+timeout. (The deep planner still passes its own 8000.)
 
 Truncation is also no longer silent. `stop_reason: "max_tokens"` means the JSON
 was cut mid-object, so the parse is doomed *and so is the identical retry*. It now
@@ -215,7 +236,7 @@ costs roughly a tenth of a fresh call.
 Every call logs one line (`server/lib/claude.js`, `logUsage`):
 
 ```
-[claude] claude-sonnet-5 stop=end_turn in=812 cache_write=0 cache_read=2254 out=143
+[claude] claude-sonnet-5-5 stop=end_turn in=812 cache_write=0 cache_read=2254 out=143
 ```
 
 - `cache_write > 0` → this call created the entry (expect this on the first call

@@ -13,8 +13,18 @@
 const Anthropic = require("@anthropic-ai/sdk");
 const { ApiError, ParseError } = require("./errors");
 
-const MODEL = "claude-sonnet-5"; // default: the fast "secretary box" routes
-const MAX_TOKENS = 4096; // a generated week of events runs well past the old 2048
+const MODEL = "claude-sonnet-5-5"; // default: the fast "secretary box" routes
+// max_tokens caps thinking + answer together, and every route thinks now, so the
+// ceiling needs room for both. Output bills by tokens actually produced, so a
+// high ceiling costs nothing unused; 16k stays inside the SDK's non-streaming
+// timeout. A hit is still caught below as AI_TRUNCATED.
+const MAX_TOKENS = 16000;
+
+// Secretary routes think, but briefly: adaptive thinking at low effort is the
+// smarter-answers-for-a-small-cost setting. Routes that need more pass their own
+// effort (generate: "medium"; the Opus deep planner: "high"). Sonnet 5.5 can't
+// turn thinking off with {type:"disabled"} anyway (a 400), so it is always on.
+const DEFAULT_EFFORT = "low";
 
 // Deep planner (deep-planner-plan.md): quality-over-price. Opus + adaptive thinking
 // + high effort is the one place plan quality compounds. budget_tokens is removed
@@ -54,7 +64,7 @@ function createClaudeCaller({ apiKey, model = MODEL, maxTokens = MAX_TOKENS } = 
   // Per-call overrides let one injected caller serve both the cheap secretary
   // routes and the Opus deep-planner routes (deep-planner-plan.md). Tests inject a
   // fake that ignores the extra options — the contract stays { system, payload }.
-  return async function callClaude({ system, payload, model: modelOverride, maxTokens: maxTokensOverride, thinking = false, effort } = {}) {
+  return async function callClaude({ system, payload, model: modelOverride, maxTokens: maxTokensOverride, effort = DEFAULT_EFFORT } = {}) {
     const params = {
       model: modelOverride ?? model,
       max_tokens: maxTokensOverride ?? maxTokens,
@@ -67,9 +77,9 @@ function createClaudeCaller({ apiKey, model = MODEL, maxTokens = MAX_TOKENS } = 
       // no error, and no write premium either, so marking unconditionally is safe.
       system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content: payload }],
+      thinking: { type: "adaptive" },
+      output_config: { effort },
     };
-    if (thinking) params.thinking = { type: "adaptive" };
-    if (effort) params.output_config = { effort };
 
     let response;
     try {
@@ -111,4 +121,4 @@ async function callAndParse(callClaude, opts, parse) {
   return parse(second);
 }
 
-module.exports = { createClaudeCaller, callAndParse, stripFences, MODEL, OPUS };
+module.exports = { createClaudeCaller, callAndParse, stripFences, MODEL, OPUS, DEFAULT_EFFORT };

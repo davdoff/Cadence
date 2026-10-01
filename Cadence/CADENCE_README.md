@@ -641,7 +641,7 @@ struct MealSchedulerService {
 After v1, add an optional **multi-turn intake flow** where Claude asks the user clarifying questions before generating the plan. This is more flexible for complex or ambiguous goals but requires managing conversation state and multiple API calls — defer to post-release.
 
 #### Deep Planner v2 (in progress — `md/current/deep-planner-plan.md`)
-The planner is being rebuilt around a **rolling week-by-week loop** rather than a one-shot phased breakdown. The design: a thin **whole-horizon skeleton** (milestones + workload budget + deadline anchor + spacing intent, *no clock times*) generated once, then **detailed session planning one week at a time** against it, advancing on completion + feedback. The planning brain runs on `claude-opus-4-8` + adaptive thinking (accuracy over cost).
+The planner is being rebuilt around a **rolling week-by-week loop** rather than a one-shot phased breakdown. The design: a thin **whole-horizon skeleton** (milestones + workload budget + deadline anchor + spacing intent, *no clock times*) generated once, then **detailed session planning one week at a time** against it, advancing on completion + feedback. The planning brain runs on `claude-opus-5` + adaptive thinking (accuracy over cost).
 
 - **Lives in the Overview tab**, split via a top segmented control `Planner | Stats` (`OverviewTabView`); the planner is primary.
 - **Increment 1 (done):** `POST /v1/plan/skeleton` (server) + one-shot intake form (`DeepPlanIntakeView`) → skeleton persisted as SwiftData **`ProjectPlan` / `WorkUnit`** models, rendered with a **cushion** badge (committed hours vs. estimated work) and the ordered work units (`DeepPlannerView`). Two work-unit archetypes: `milestone` (complete once, in order) and `repetition` (revisit at growing gaps — spaced retrieval).
@@ -723,6 +723,14 @@ server/
 The server is **stateless and OS-blind**: every request carries `now` +
 `timezone` from the device, all times are ISO8601 with the device UTC offset
 (never `Z`), and the device stays the source of truth for data.
+
+**Models and thinking.** The secretary routes run on `claude-sonnet-5-5`; the
+deep-planner skeleton runs on `claude-opus-5`. Every call uses adaptive thinking
+(Sonnet 5.5 can't turn it off, and the trade is deliberate: smarter answers for
+a few more output tokens). Depth is set per route with `effort`: `low` by default
+(`DEFAULT_EFFORT` in `server/lib/claude.js`), `medium` for `/v1/schedule/generate`,
+`high` for `/v1/plan/skeleton`. `max_tokens` is 16000 because it caps thinking
+and answer together. Rationale and cost notes: `prompt-caching-plan.md` §Models.
 
 ### Routes
 
@@ -990,10 +998,9 @@ before touching prompt assembly:
   every call a cache miss. `NOW` is in the payload for exactly this reason.
 - **Never branch a system prompt on a request field.** Each combination is a
   separate prefix. This is why the `intentHint` is a payload line and not a
-  per-intent prompt — and why *shrinking* interpret's prompt per intent would
-  cost ~4× more than leaving it long and cached, since a ~850-token prompt also
-  falls under the model's minimum cacheable prefix. Arithmetic in
-  `prompt-caching-plan.md`.
+  per-intent prompt — and why interpret isn't split into ten per-intent prompts:
+  ten prefixes would mostly sit cold, and a cold trimmed prompt costs ~4× a warm
+  shared one. Arithmetic in `prompt-caching-plan.md`.
 - **One cached prefix, shared by all users.** Caches are workspace-scoped and the
   server holds one API key, so every user's `interpret` call reads the same
   entry — no per-user warm-up, and no reason for a per-user breakpoint.

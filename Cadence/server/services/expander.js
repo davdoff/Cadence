@@ -19,7 +19,9 @@ async function expandGoalsToEvents(callClaude, { now, zone, period, goals, freeS
   const payload = buildGenerate({ now, period, goals, freeSlots, prefs });
   return callAndParse(
     callClaude,
-    { system: prompts.generate, payload },
+    // Medium, not the secretary default of low: filling a period means trading
+    // goals off against each other across many slots, where more thought pays.
+    { system: prompts.generate, payload, effort: "medium" },
     (text) => parseGenerate(text, { zone })
   );
 }

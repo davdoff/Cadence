@@ -213,8 +213,8 @@ test("parseHistory: filters non-conforming entries and caps to MAX_HISTORY_TURNS
 
 test("POST /v1/schedule/generate returns events; past part of period is clipped", async () => {
   let seen;
-  const fake = async ({ system, payload }) => {
-    seen = { system, payload };
+  const fake = async ({ system, payload, effort }) => {
+    seen = { system, payload, effort };
     return JSON.stringify({
       events: [
         { title: "Workout", start: "2026-07-06T09:00:00+03:00", end: "2026-07-06T10:00:00+03:00", category: "Health" },
@@ -238,6 +238,8 @@ test("POST /v1/schedule/generate returns events; past part of period is clipped"
     assert.match(seen.payload, /GOALS: "three workouts"/);
     assert.match(seen.payload, /AILevel=balanced/);
     assert.doesNotMatch(seen.payload, /SUN/); // no slots from the past Sunday
+    // Generate thinks harder than the secretary default ("low").
+    assert.equal(seen.effort, "medium");
   } finally { close(); }
 });
 
