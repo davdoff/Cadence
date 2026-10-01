@@ -272,7 +272,7 @@ struct HabitCard: View {
     let onDetail: () -> Void
     @Environment(\.modelContext) private var context
 
-    /// Per-habit tile palette (CADENCE_DESIGN_SYSTEM §4/§5), resolved for the
+    /// Per-habit tile palette (CADENCE_README §5b), resolved for the
     /// active surface. `accent` is its icon color — the single flat hue used by
     /// streaks, counts, and shadows.
     private var tile:        HabitTileColor.Tokens { HabitTileColor.by(id: habit.tileColorID).tokens(dark: theme.isDark) }

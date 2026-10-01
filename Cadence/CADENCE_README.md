@@ -94,6 +94,49 @@ event. No AI involved anywhere in the import.
   so Cadence is the single source of truth for reminders (no `VALARM`
   double-notification trap).
 
+#### 1.1a The ICS endpoint (`POST /v1/calendar/ics` — `server/services/ics.js`)
+
+The server half of feed import. Entirely deterministic — no Claude call, no
+state. The client re-sends `{ url, now, timezone, windowStart, windowEnd }` on
+every sync and gets back `{ events, feedName }` — plain DTOs
+(`title / start / end / allDay / externalIdentifier / seriesIdentifier`). The
+server stores nothing between calls.
+
+- **Window validation** (in the route, before any fetch): `windowEnd` must be
+  after `windowStart`, a date-only `windowEnd` is treated as inclusive
+  (`endOf("day")`), and the span must be **≤ 90 days** — a longer window is a
+  `BAD_REQUEST`, which is what keeps an unbounded feed from being expanded into
+  an unbounded response. `now` is required by the base contract even though
+  expansion itself is driven by the window.
+- **Fetch.** `webcal://` is rewritten to `https://`; anything other than
+  http(s) is rejected. Redirects are followed and a mislabelled `Content-Type`
+  is tolerated, but the body must contain `BEGIN:VCALENDAR` or the URL is
+  rejected as not an iCalendar feed. Guards: a **15s timeout** (surfaced as the
+  `TIMEOUT` error code, HTTP 504) and a **10 MB** body cap.
+- **Privacy rule — nothing in this file may log a feed URL or put one in an
+  error message.** A feed URL routinely *is* the credential (Google's "secret
+  address in iCal format"), so a logged URL is a leaked calendar. That's why
+  the error copy is deliberately generic ("Could not fetch the calendar feed")
+  rather than echoing the input.
+- **Parsing** is delegated to `node-ical` (container format, line folding,
+  VTIMEZONE) and `rrule` (recurrence expansion): RRULE, EXDATE, RDATE and
+  RECURRENCE-ID overrides. `STATUS:CANCELLED` events are dropped.
+- **Two library quirks are compensated for here**, both serving the OS-blind
+  rule that the *device's* timezone decides everything:
+  1. Zoned and UTC times arrive as real instants (tagged `.tz`) and are just
+     converted to the device zone. **Floating and all-day (`VALUE=DATE`)
+     times**, though, are materialized by node-ical at the *server's* wall
+     clock — those are rebuilt as the same wall time in the device zone, so the
+     result never depends on where the server runs.
+  2. **RDATE** is left as a raw value string by node-ical, so it's parsed by
+     hand (Z-suffixed UTC, or wall time in the event's own zone, falling back
+     to the device zone when floating). An unparseable token is skipped rather
+     than failing the whole feed.
+- **Output** matches what EventKit import produces, so feeds and device
+  calendars share one dedupe/tombstone pass on the client (§1.1): each instance
+  carries a per-occurrence identifier plus a `seriesIdentifier` (null for
+  one-offs). The client decodes them through the thin `ICSImporter`.
+
 ### 2. Event Management
 Each event supports:
 - Delete single occurrence
@@ -218,12 +261,23 @@ every-X cadences), and an optional end date.
   calendar sync doesn't re-insert them.
 
 ### 5b. UI theme layer (`Extensions/Theme.swift`)
+
+> This section **is** the design system — there is no separate design-system
+> doc, and the token values below are the spec, not a summary of one. Code
+> comments in `Theme.swift`, `Font+Cadence.swift`, `HabitTileColor.swift` and
+> the habit models point here.
+
 - `Theme` has **two independent axes**:
   the **accent** (`accentHex`, from the Settings color picker) drives accent
   gradients; the **surface** (`Surface.light` / `Surface.dark`) drives all
   mode-dependent chrome (text, cards, chips, tab bar, dividers, tracks).
   Injected once from `ContentView` via `.environment(\.theme, …)`; every view
   reads `@Environment(\.theme)`.
+- **Why two axes:** the accent is user data (any hex), the surface is a fixed
+  pair of hand-tuned token sets. Keeping them orthogonal means a new accent
+  never needs new chrome values, and dark mode never needs a second accent
+  palette — every screen is (any accent) × (light | dark) with no combination
+  left undefined.
 - **Light/dark mode:** `@AppStorage("themeMode")` (`ThemeMode` = `.system` /
   `.light` / `.dark`) is the live driver, mirrored into `UserPreferences.themeModeRaw`
   for durability. `ContentView` resolves it against `@Environment(\.colorScheme)`
@@ -237,6 +291,47 @@ every-X cadences), and an optional end date.
   `barGradient` (progress bars), `cardGradient` (card wash), `ringGradient`
   (conic habits ring), `emptyOrb` (radial empty-state), `tabbarGradient`,
   and `categoryGradient(hex:)` (180° bar/dot from any category/habit hex).
+- **Design tokens — the accent axis** (`Extensions/Color+Hex.swift`). Every
+  accent shade is *derived arithmetically* from the one stored hex, so an
+  arbitrary user color works without a hand-authored palette. Two operations:
+  `tintedWhite(hex, amount)` blends toward white (`0` = white, `1` = the accent
+  itself) and `darkened(hex, amount)` multiplies each RGB channel (`0` = black).
+  | Token | Derivation | Used for |
+  |---|---|---|
+  | `theme.accent` | the stored hex, unchanged | tints, icons, selected text |
+  | `theme.light` | `tintedWhite(0.55)` | gradient top / soft fills |
+  | `theme.dark` | `darkened(0.78)` | gradient bottom |
+  | `theme.deep` | `tintedWhite(0.16)` | dividers, borders |
+  | `.appBackground(hex)` | `tintedWhite(0.07)` | light-mode page wash |
+  `Color(hex:)` accepts 3- or 6-digit strings and falls back to black on
+  anything it can't scan — so a malformed stored hex degrades visibly rather
+  than crashing.
+- **Accent presets** (`SettingsView.themeColors`, a horizontal swatch row):
+  Flame `#E8784D` (the default), Rose `#E05272`, Plum `#8B52E0`, Ocean
+  `#4A90E2`, Forest `#52C47A`, Gold `#C4A232`, Slate `#5A7A8A`. Picking one
+  writes `@AppStorage("accentColorHex")` and mirrors it to the widget via
+  `WidgetSync.mirrorAccent`. The list is presentation-only — nothing else reads
+  it, so adding a swatch is a one-line change.
+- **Design tokens — the surface axis** (`Surface.light` / `Surface.dark`). The
+  light set is tuned warm-green ("vibrant & saturated"); the dark set is near-
+  black with a cool cast. Both define the same token names, which is what lets
+  views read `theme.text` and never branch on mode:
+  | Token | Light | Dark | Used for |
+  |---|---|---|---|
+  | `text` | `#0f231a` | `#eaf5ef` | primary text |
+  | `text2` | `#5c7a6c` | `#8ba39a` | secondary text, unselected tabs |
+  | `cardRing` | white @ 0.9 | white @ 0.09 | 1px card edge |
+  | `cardShadow` | `#14965f` @ 0.42 | black @ 0.7 | card drop shadow |
+  | `chipBg` / `chipText` | white @ 0.78 / `#4f7061` | white @ 0.07 / `#a7bcb2` | chips, pills |
+  | `tabChip` | white @ 0.62 | white @ 0.06 | tab-bar chip |
+  | `divider` | `#0f5a37` @ 0.11 | white @ 0.1 | hairlines |
+  | `track` | `#0f784b` @ 0.14 | white @ 0.11 | progress-bar tracks |
+  | `tabbarStops` | `#ecfbf3`→`#e0f6eb` | `#101a16`→`#0c1411` | tab-bar wash under the blur |
+  | `darkBgStops` | *(empty)* | `#0c1613`→`#0d1524`→`#150f28` | page wash |
+  Note the asymmetry in the page background: **dark mode uses those three fixed
+  stops; light mode builds its wash from the accent** (`appBackground` twice,
+  cooling to `#dfeaff`) so any accent reads as intentional instead of only
+  green. That's the one place the two axes touch.
 - `.cardStyle(prominent:)` is the shared card chrome (gradient surface + corner
   radius + soft colored shadow + 1px translucent ring) used by all cards; hero
   cards (Overview ring, Habits summary) pass `prominent: true`.
@@ -559,7 +654,40 @@ The planner is being rebuilt around a **rolling week-by-week loop** rather than 
 - **Next:** multiturn clarify intake (`/v1/plan/intake`) + rebudget (Opus), consuming the feedback note.
 
 ### 12. Siri / App Shortcuts (spike)
-Phase 0 spike proving hands-free, app-closed voice access to the existing AI assistant — no new brain, no server changes. `AskCadenceIntent` (app target, `Cadence/Intents/AskCadenceIntent.swift`) is a background `AppIntent` that takes a dictated question, passes it to the existing `AIService.interpret()` (`/v1/schedule/interpret`), and speaks back `readOnlyReply`/`interpretation`. Discoverable via one registered phrase ("Ask Cadence") in `CadenceShortcuts` (`AppShortcutsProvider`, `Cadence/Intents/CadenceShortcuts.swift`). **Read-only only** — no schedule mutations yet. The intended next phases were a hardened read-only pass, then confirmed single-event mutations; they were never written up beyond that sentence, so re-plan them from scratch when picking this up.
+Phase 0 spike proving hands-free, app-closed voice access to the existing AI assistant — no new brain, no server changes. `AskCadenceIntent` (app target, `Cadence/Intents/AskCadenceIntent.swift`) is a background `AppIntent` that takes a dictated question, passes it to the existing `AIService.interpret()` (`/v1/schedule/interpret`), and speaks back `readOnlyReply`/`interpretation`. Discoverable via one registered phrase ("Ask Cadence") in `CadenceShortcuts` (`AppShortcutsProvider`, `Cadence/Intents/CadenceShortcuts.swift`). **Read-only only** — no schedule mutations yet.
+
+How the intent behaves, since the voice path has constraints the in-app box doesn't:
+
+- **Background execution is the point.** `openAppWhenRun = false`, so the answer
+  is spoken without the app coming to the foreground. It reads SwiftData
+  directly from `SharedModelContainer.shared.mainContext` (events, categories,
+  preferences) and passes them to `AIService.interpret()` — no new prompt, no
+  new parser, and `AIService` stays detached per the architecture rule.
+- **A 20s self-imposed deadline.** iOS gives a background intent roughly 30s.
+  `AIService` inherits URLSession's 60s timeout and the server only reports
+  `TIMEOUT` after a longer SDK-level timeout — both well past that budget, so a
+  stalled backend would make Siri speak *its own* generic failure. The intent
+  races the round-trip against a 20s sleep in a task group; first finisher wins,
+  the loser is cancelled. Kept local to the intent rather than pushed into
+  `AIService`, which has no business knowing about Siri.
+- **Errors are never rethrown** — a thrown error also makes Siri substitute its
+  generic line. Every path returns spoken copy instead: a timeout gets "took too
+  long", a reached-but-failed server (`AI_UNPARSEABLE`, `AI_UPSTREAM`, …) speaks
+  the per-code copy `AIServiceError` already carries (saying "couldn't reach
+  Cadence" would be wrong — it *was* reached), and anything else falls back to a
+  generic reachability line.
+- **What it speaks:** `decision.readOnlyReply` for the read-only intents
+  (`.query` / `.summarize`), else `decision.interpretation`. Mutating decisions
+  therefore describe what they *would* do and change nothing — there is no
+  confirmation step over voice yet, which is exactly why mutations are deferred.
+- **Discovery:** one registered phrase, "Ask Cadence" (`CadenceShortcuts`), so
+  no manual Shortcuts setup is needed. More phrasings were planned next.
+
+**No plan doc exists for the later phases.** The intended direction was a
+hardened read-only pass and then confirmed single-event mutations, but that was
+only ever recorded as a one-line pointer to a since-deleted file — the gating
+question (how a user confirms a schedule change by voice, when the app never
+opens) is unanswered and needs re-planning from scratch.
 
 ---
 
@@ -612,7 +740,7 @@ The server is **stateless and OS-blind**: every request carries `now` +
 | `POST /v1/plan/skeleton` | **Deep planner** — thin whole-horizon skeleton (work units + objectives + hour estimates + spacing constraints) with cushion math. Runs on `claude-opus-4-8` + adaptive thinking + `effort:"high"` (quality over cost), unlike the Sonnet secretary routes. Spec: `deep-planner-plan.md` |
 | `POST /v1/plan/week` | **Deep planner — deterministic, no Claude call.** Selects the work units due in a week and packs them into free slots (`services/weeklyPlanner.js`). Window clamped to `now` **and to the deadline**, with a per-unit no-new-material cutoff (`notLastNDaysBeforeDeadline`). Spec: `deep-planner-plan.md` |
 | `POST /v1/plan/tweak` | **Deep planner** — small **content-only** edit of selected sessions (clarify objective / mark done / change duration / free-form). Runs on the **default Sonnet model** (cheap; shares the plan's work units as context), never the Opus planner. Returns `{ edits: [{ ref, title?, objective?, durationMinutes?, done?, summary }] }`. Does not reschedule. Spec: `deep-planner-plan.md` |
-| `POST /v1/calendar/ics` | **Deterministic — no Claude call.** Fetches an `.ics` feed URL (`webcal://` normalised) and expands it (RRULE/EXDATE/RDATE/RECURRENCE-ID, UTC/TZID/floating/all-day forms) into concrete event DTOs within a ≤ 90-day window. Stateless: the URL is re-sent on every sync, never stored or logged (secret feed URLs carry auth). Behaviour is described in §1.1 above. |
+| `POST /v1/calendar/ics` | **Deterministic — no Claude call.** Fetches an `.ics` feed URL and expands it into concrete event DTOs within a ≤ 90-day window. Full behaviour in §1.1a. |
 
 The old `/api/*` passthrough routes stay mounted (only when an API key is
 present) so the currently shipped iOS build keeps working during migration.

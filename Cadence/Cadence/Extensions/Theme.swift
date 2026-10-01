@@ -20,7 +20,7 @@ extension ThemeMode {
     }
 }
 
-/// The *non-accent* half of the design tokens (CADENCE_DESIGN_SYSTEM §3): the
+/// The *non-accent* half of the design tokens (CADENCE_README §5b): the
 /// surfaces, text, and chrome that flip with light/dark mode. The accent half
 /// (pills, ring, category/habit gradients) is layered on top by `Theme` from
 /// the user's chosen accent hex — so the two axes stay independent.

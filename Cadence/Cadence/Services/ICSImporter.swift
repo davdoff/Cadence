@@ -1,6 +1,6 @@
 import Foundation
 
-/// Thin client for POST /v1/calendar/ics (calendar-import.md §4.0, §4.3):
+/// Thin client for POST /v1/calendar/ics (CADENCE_README §1.1a):
 /// sends the feed URL + expansion window, decodes the returned event DTOs
 /// into ImportedEventInstance values for CalendarImportService's shared
 /// dedupe pass. The server owns fetching and RFC 5545/RRULE expansion — no

@@ -5,10 +5,10 @@ import Foundation
 // APP TARGET ONLY — never add this file to the widget extension. It calls
 // `AIService` (network + app-only types); the widget process must not.
 //
-// Phase 0 of SIRI_PLAN.md: a read-only voice spike. Siri dictates a question,
-// the intent hands it to the existing `interpret()` brain and speaks back what
-// comes out. No SwiftData writes, no new prompts, no parsing — `AIService`
-// stays detached and this intent is the only glue.
+// Phase 0 of the Siri spike (CADENCE_README §12): read-only voice. Siri
+// dictates a question, the intent hands it to the existing `interpret()` brain
+// and speaks back what comes out. No SwiftData writes, no new prompts, no
+// parsing — `AIService` stays detached and this intent is the only glue.
 
 /// "Hey Siri, ask Cadence what's on my afternoon" — runs in the background
 /// (the app never opens) and speaks the assistant's reply.

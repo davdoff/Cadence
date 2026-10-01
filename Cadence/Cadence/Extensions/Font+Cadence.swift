@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 
-/// Cadence typography (CADENCE_DESIGN_SYSTEM §1). Two families:
+/// Cadence typography (CADENCE_README §5b, "Typography"). Two families:
 ///
 /// - **Bricolage Grotesque ExtraBold** — big headlines and numbers *only*
 ///   (the Today date header, hero stat numbers).

@@ -14,7 +14,7 @@ final class Habit {
     var symbolName: String = "star.fill"   // SF Symbol name
     var colorHex:   String = "#E8784D"     // widget-facing flat color; kept in
                                            //   sync with the tile's solid color
-    // Per-habit tile-color identity (CADENCE_DESIGN_SYSTEM §5). A plain String
+    // Per-habit tile-color identity (CADENCE_README §5b). A plain String
     // so this widget-shared model stays Foundation-only; must match a
     // `HabitTileColor` id. Declaration default migrates existing habits.
     var tileColorID: String = "orange"

@@ -36,7 +36,7 @@ struct CadenceApp: App {
                     RecurrenceService.shared.topUp(context: container.mainContext)
                 }
                 // iOS posts this when the underlying calendar database changes —
-                // re-sync imported events (calendar-import.md §3.4). Never prompts.
+                // re-sync imported events (CADENCE_README §1.1). Never prompts.
                 .onReceive(NotificationCenter.default.publisher(for: .EKEventStoreChanged)) { _ in
                     CalendarImportService.shared.syncIfAuthorized(context: container.mainContext)
                 }

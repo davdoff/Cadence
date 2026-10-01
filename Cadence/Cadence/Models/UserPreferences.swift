@@ -39,7 +39,7 @@ final class UserPreferences {
     // AI behaviour: 1 = passive suggestions, 5 = aggressive scheduling
     var aiAggressiveness: Int
 
-    // Visual theme override (CADENCE_DESIGN_SYSTEM §5). Durable record of the
+    // Visual theme override (CADENCE_README §5b). Durable record of the
     // Light/Dark/System choice; ContentView drives live rendering off the
     // mirrored @AppStorage("themeMode"). Declaration default for migration.
     var themeModeRaw: String = ThemeMode.system.rawValue

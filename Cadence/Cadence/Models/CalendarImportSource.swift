@@ -1,7 +1,7 @@
 import SwiftData
 import Foundation
 
-/// A calendar the user has connected for import (calendar-import.md §1):
+/// A calendar the user has connected for import (CADENCE_README §1.1):
 /// a device calendar today, an .ics subscription URL or one-off file later.
 /// Lets the Preferences screen list and remove sources, and carries the
 /// tombstones that stop re-syncs from resurrecting locally deleted imports.
@@ -19,7 +19,7 @@ final class CalendarImportSource {
     var lastSyncedAt: Date?
     var isEnabled: Bool
     // externalIdentifiers the user deleted locally — the sync pass skips
-    // re-inserting these (calendar-import.md §5.1 note).
+    // re-inserting these (CADENCE_README §5 note).
     var deletedExternalIdentifiers: [String]
 
     enum Kind: String, Codable {

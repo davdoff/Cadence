@@ -17,7 +17,7 @@ struct ImportedEventInstance {
     let seriesIdentifier: String?
 }
 
-/// Calendar import orchestration (calendar-import.md §3–§4): runs sync passes
+/// Calendar import orchestration (CADENCE_README §1.1): runs sync passes
 /// over the user's connected sources, deduping on externalIdentifier scoped
 /// to importSourceID, and owns the tombstone rule so locally deleted imports
 /// don't come back on the next sync.

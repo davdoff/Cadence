@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// A per-habit color identity (CADENCE_DESIGN_SYSTEM §3 "Habit tile colors" +
-/// §5). User-assignable at habit creation, and **extensible** — add entries to
-/// `all` and the picker/cards pick them up automatically. Each identity carries
+/// A per-habit color identity (CADENCE_README §5b, "Per-habit tile colors").
+/// User-assignable at habit creation, and **extensible** — add entries to `all`
+/// and the picker/cards pick them up automatically. Each identity carries
 /// a light and a dark token set so tiles read correctly in both surfaces.
 ///
 /// Stored on `Habit.tileColorID` as a plain `String`, which keeps the

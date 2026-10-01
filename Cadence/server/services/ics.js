@@ -1,6 +1,6 @@
 /**
  * ICS feed import — deterministic fetch + RFC 5545 expansion for
- * POST /v1/calendar/ics (calendar-import.md §4). No Claude call anywhere.
+ * POST /v1/calendar/ics (CADENCE_README §1.1a). No Claude call anywhere.
  *
  * Privacy rule: feed URLs routinely carry auth secrets in the URL itself
  * (Google's "secret address in iCal format"), so nothing in this file may

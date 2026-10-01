@@ -4,7 +4,7 @@ import EventKit
 
 /// Preferences → "Import calendars": permission flow, the in-app calendar
 /// picker (the OS grant is all-or-nothing — ours isn't), and management of
-/// connected sources (calendar-import.md §2–§3).
+/// connected sources (CADENCE_README §1.1).
 struct CalendarImportView: View {
     @Environment(\.modelContext) private var context
     @Query(sort: \CalendarImportSource.displayName) private var sources: [CalendarImportSource]

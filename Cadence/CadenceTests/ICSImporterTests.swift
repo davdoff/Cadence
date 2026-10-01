@@ -1,7 +1,7 @@
 import XCTest
 @testable import Cadence
 
-/// ICSImporter is a thin /v1 DTO exchange (calendar-import.md §4): these
+/// ICSImporter is a thin /v1 DTO exchange (CADENCE_README §1.1a): these
 /// tests cover request encoding and response decoding via AIService's
 /// _callAPI hook. The actual feed fetch + RFC 5545/RRULE expansion is server
 /// code, covered by server/test/ics.test.js — not re-tested here.

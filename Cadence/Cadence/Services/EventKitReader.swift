@@ -1,7 +1,7 @@
 import Foundation
 import EventKit
 
-/// Pure EventKit access (calendar-import.md §2–§3): iOS 17+ permission flow
+/// Pure EventKit access (CADENCE_README §1.1): iOS 17+ permission flow
 /// and fetching device-calendar events as expanded occurrences. Covers every
 /// account iOS surfaces (Google, Outlook, iCloud, Exchange, subscriptions).
 /// Returns plain value types only — applying them to SwiftData is

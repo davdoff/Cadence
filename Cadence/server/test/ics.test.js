@@ -1,6 +1,6 @@
 /**
  * POST /v1/calendar/ics — fixture ICS strings, injected fake fetch, zero
- * network, deterministic window/zone (calendar-import.md §6). Covers: a UTC
+ * network, deterministic window/zone (CADENCE_README §1.1a). Covers: a UTC
  * event, a TZID event, an all-day event, a weekly RRULE with an EXDATE and a
  * RECURRENCE-ID override, a floating event, and a folded long SUMMARY line.
  *

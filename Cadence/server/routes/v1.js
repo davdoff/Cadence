@@ -177,7 +177,7 @@ function createV1Router({ callClaude, fetchImpl = globalThis.fetch }) {
   }));
 
   // ── Calendar import — deterministic ICS expansion, NO Claude call ───────
-  // calendar-import.md §4. Stateless: the feed URL is re-sent on every sync,
+  // CADENCE_README §1.1a. Stateless: the feed URL is re-sent on every sync,
   // never stored — and never logged, since secret feed URLs carry auth.
 
   router.post("/calendar/ics", wrap(async (req, res) => {
