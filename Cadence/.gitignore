@@ -1,5 +1,8 @@
 .env
 node_modules/
-*.md
-!CADENCE_README.md
+# Markdown: project docs ARE tracked — md/ (plans, specs, reference) and
+# CADENCE_README.md. Two personal files stay out: CLAUDE.md is session config
+# for how Claude works, and whiteboard.md is wiped and rewritten per topic.
+CLAUDE.md
+whiteboard.md
 server.js
