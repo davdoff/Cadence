@@ -23,7 +23,7 @@ A native iOS scheduling and productivity app for a first-time solo release. The 
 - **AI-assisted input** — user describes an event in natural language; Claude analyses it against current schedule and user preferences before adding
 - **Manual input** — title, date, time, duration, category
 
-#### 1.1 Device-calendar import (implemented — calendar-import.md §1–§3)
+#### 1.1 Device-calendar import (implemented)
 
 Settings → Calendars → **Import calendars** connects the user's device
 calendars (Google, Outlook, iCloud, Exchange — everything iOS surfaces via
@@ -218,7 +218,7 @@ every-X cadences), and an optional end date.
   calendar sync doesn't re-insert them.
 
 ### 5b. UI theme layer (`Extensions/Theme.swift`)
-- `Theme` has **two independent axes** (see `CADENCE_DESIGN_SYSTEM.md`):
+- `Theme` has **two independent axes**:
   the **accent** (`accentHex`, from the Settings color picker) drives accent
   gradients; the **surface** (`Surface.light` / `Surface.dark`) drives all
   mode-dependent chrome (text, cards, chips, tab bar, dividers, tracks).
@@ -558,8 +558,8 @@ The planner is being rebuilt around a **rolling week-by-week loop** rather than 
 - **Review-pass fixes (Fable review):** deleting a plan now **deletes future pending sessions + cancels their reminders and keeps/unlinks past ones** (no orphans/ghost reminders); genuine "mark done" (context menu + AI tweak `done`) routes through `EventActionService.complete` (habits + Live Activity stay consistent); `/v1/plan/week` clamps the window to the deadline and enforces a **per-unit no-new-material cutoff** so sessions can't leak past it mid-window; `insertSessions` resolves categories once (no duplicate rows); multi-select state clears on plan switch; `AddEventView` hides Repeats for plan sessions (a recurrence would spawn unlinked clones); parsers now reject dangling skeleton refs and tweak edits for unsent sessions (retry-once).
 - **Next:** multiturn clarify intake (`/v1/plan/intake`) + rebudget (Opus), consuming the feedback note.
 
-### 12. Siri / App Shortcuts (spike — `SIRI_PLAN.md`)
-Phase 0 spike proving hands-free, app-closed voice access to the existing AI assistant — no new brain, no server changes. `AskCadenceIntent` (app target, `Cadence/Intents/AskCadenceIntent.swift`) is a background `AppIntent` that takes a dictated question, passes it to the existing `AIService.interpret()` (`/v1/schedule/interpret`), and speaks back `readOnlyReply`/`interpretation`. Discoverable via one registered phrase ("Ask Cadence") in `CadenceShortcuts` (`AppShortcutsProvider`, `Cadence/Intents/CadenceShortcuts.swift`). **Read-only only** — no schedule mutations yet; see `SIRI_PLAN.md` for the phased plan (hardened read-only, then confirmed single-event mutations).
+### 12. Siri / App Shortcuts (spike)
+Phase 0 spike proving hands-free, app-closed voice access to the existing AI assistant — no new brain, no server changes. `AskCadenceIntent` (app target, `Cadence/Intents/AskCadenceIntent.swift`) is a background `AppIntent` that takes a dictated question, passes it to the existing `AIService.interpret()` (`/v1/schedule/interpret`), and speaks back `readOnlyReply`/`interpretation`. Discoverable via one registered phrase ("Ask Cadence") in `CadenceShortcuts` (`AppShortcutsProvider`, `Cadence/Intents/CadenceShortcuts.swift`). **Read-only only** — no schedule mutations yet. The intended next phases were a hardened read-only pass, then confirmed single-event mutations; they were never written up beyond that sentence, so re-plan them from scratch when picking this up.
 
 ---
 
@@ -612,7 +612,7 @@ The server is **stateless and OS-blind**: every request carries `now` +
 | `POST /v1/plan/skeleton` | **Deep planner** — thin whole-horizon skeleton (work units + objectives + hour estimates + spacing constraints) with cushion math. Runs on `claude-opus-4-8` + adaptive thinking + `effort:"high"` (quality over cost), unlike the Sonnet secretary routes. Spec: `deep-planner-plan.md` |
 | `POST /v1/plan/week` | **Deep planner — deterministic, no Claude call.** Selects the work units due in a week and packs them into free slots (`services/weeklyPlanner.js`). Window clamped to `now` **and to the deadline**, with a per-unit no-new-material cutoff (`notLastNDaysBeforeDeadline`). Spec: `deep-planner-plan.md` |
 | `POST /v1/plan/tweak` | **Deep planner** — small **content-only** edit of selected sessions (clarify objective / mark done / change duration / free-form). Runs on the **default Sonnet model** (cheap; shares the plan's work units as context), never the Opus planner. Returns `{ edits: [{ ref, title?, objective?, durationMinutes?, done?, summary }] }`. Does not reschedule. Spec: `deep-planner-plan.md` |
-| `POST /v1/calendar/ics` | **Deterministic — no Claude call.** Fetches an `.ics` feed URL (`webcal://` normalised) and expands it (RRULE/EXDATE/RDATE/RECURRENCE-ID, UTC/TZID/floating/all-day forms) into concrete event DTOs within a ≤ 90-day window. Stateless: the URL is re-sent on every sync, never stored or logged (secret feed URLs carry auth). Spec: `calendar-import.md` §4 |
+| `POST /v1/calendar/ics` | **Deterministic — no Claude call.** Fetches an `.ics` feed URL (`webcal://` normalised) and expands it (RRULE/EXDATE/RDATE/RECURRENCE-ID, UTC/TZID/floating/all-day forms) into concrete event DTOs within a ≤ 90-day window. Stateless: the URL is re-sent on every sync, never stored or logged (secret feed URLs carry auth). Behaviour is described in §1.1 above. |
 
 The old `/api/*` passthrough routes stay mounted (only when an API key is
 present) so the currently shipped iOS build keeps working during migration.

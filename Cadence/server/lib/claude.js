@@ -13,7 +13,7 @@ const { ApiError, ParseError } = require("./errors");
 const MODEL = "claude-sonnet-4-6"; // default: the fast "secretary box" routes
 const MAX_TOKENS = 2048; // reorganize/generate payloads are larger than the old 1024
 
-// Deep planner (deep-planner.md §6): quality-over-price. Opus + adaptive thinking
+// Deep planner (deep-planner-plan.md): quality-over-price. Opus + adaptive thinking
 // + high effort is the one place plan quality compounds. budget_tokens is removed
 // on Opus 4.8 (400s); adaptive thinking is OFF unless set explicitly.
 const OPUS = "claude-opus-4-8";
@@ -31,7 +31,7 @@ function createClaudeCaller({ apiKey, model = MODEL, maxTokens = MAX_TOKENS } = 
   const anthropic = new Anthropic({ apiKey });
 
   // Per-call overrides let one injected caller serve both the cheap secretary
-  // routes and the Opus deep-planner routes (deep-planner.md §6). Tests inject a
+  // routes and the Opus deep-planner routes (deep-planner-plan.md). Tests inject a
   // fake that ignores the extra options — the contract stays { system, payload }.
   return async function callClaude({ system, payload, model: modelOverride, maxTokens: maxTokensOverride, thinking = false, effort } = {}) {
     const params = {
