@@ -545,7 +545,7 @@ struct MealSchedulerService {
 #### Post-Release: Conversational Intake (Planned)
 After v1, add an optional **multi-turn intake flow** where Claude asks the user clarifying questions before generating the plan. This is more flexible for complex or ambiguous goals but requires managing conversation state and multiple API calls — defer to post-release.
 
-#### Deep Planner v2 (in progress — `deep-planner-plan.md`)
+#### Deep Planner v2 (in progress — `md/current/deep-planner-plan.md`)
 The planner is being rebuilt around a **rolling week-by-week loop** rather than a one-shot phased breakdown. The design: a thin **whole-horizon skeleton** (milestones + workload budget + deadline anchor + spacing intent, *no clock times*) generated once, then **detailed session planning one week at a time** against it, advancing on completion + feedback. The planning brain runs on `claude-opus-4-8` + adaptive thinking (accuracy over cost).
 
 - **Lives in the Overview tab**, split via a top segmented control `Planner | Stats` (`OverviewTabView`); the planner is primary.
@@ -570,8 +570,8 @@ The AI "brain" lives entirely **server-side**. The Node/Express backend (the
 context/prompt building, free-slot computation, Claude calls, and response
 parsing (with a **retry-once rule** on unparseable model output). The iOS
 client only exchanges **typed JSON DTOs** — it never sees a prompt or raw
-model output. Design docs: `BACKEND_PLAN.md` (migration + contract) and
-`ai-planner.md` (planner contract, intents, UX rules).
+model output. Design docs: `md/useful/BACKEND_PLAN.md` (migration + contract) and
+`md/done/ai-planner.md` (planner contract, intents, UX rules).
 
 ### Backend layout (`server/`)
 
@@ -869,7 +869,7 @@ A 5-preset countdown widget that rings a real AlarmKit alarm (iOS 26+, falls bac
 to a notification below that), plus a "Quick Timer" section in Settings. It is
 **deliberately isolated** — no ties to `Event`, `Habit`, `Meal`, or the AI layer,
 and it is not part of the product spec above. Full writeup and safe-removal steps
-live in `CADENCE_WIDGET_TIMERS.md`; treat it as opt-out scaffolding, not a
+live in `md/useful/CADENCE_WIDGET_TIMERS.md`; treat it as opt-out scaffolding, not a
 feature to build on.
 
 ---
