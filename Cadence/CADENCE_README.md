@@ -729,7 +729,7 @@ The server is **stateless and OS-blind**: every request carries `now` +
 | Route | Purpose |
 |---|---|
 | `GET /v1/health` | Health check |
-| `POST /v1/schedule/interpret` | **The "Ask AI" secretary box** — classifies free text into an intent and returns a typed decision (see below) |
+| `POST /v1/schedule/interpret` | **The "Ask AI" secretary box** — classifies free text into an intent and returns a typed decision (see below). Optional `intentHint` (`"ask"` / `"change"`) lets the caller pre-declare read-only vs mutating |
 | `POST /v1/schedule/add` | Add event from natural language → scheduling decision |
 | `POST /v1/schedule/move` | Move an existing event → decision + alternatives |
 | `POST /v1/schedule/reschedule` | Reschedule a missed event into a free slot |
@@ -737,7 +737,7 @@ The server is **stateless and OS-blind**: every request carries `now` +
 | `POST /v1/meal/suggestions` | New-meal options fitted to dinner slots (returns `[]` without an AI call when no slots exist) |
 | `POST /v1/habits/analysis` | Weekly habit insight (plain text) |
 | `POST /v1/project/plan` | Deep project phase breakdown (legacy phase model) |
-| `POST /v1/plan/skeleton` | **Deep planner** — thin whole-horizon skeleton (work units + objectives + hour estimates + spacing constraints) with cushion math. Runs on `claude-opus-4-8` + adaptive thinking + `effort:"high"` (quality over cost), unlike the Sonnet secretary routes. Spec: `deep-planner-plan.md` |
+| `POST /v1/plan/skeleton` | **Deep planner** — thin whole-horizon skeleton (work units + objectives + hour estimates + spacing constraints) with cushion math. Runs on `claude-opus-5` + adaptive thinking + `effort:"high"` (quality over cost), unlike the Sonnet secretary routes. Spec: `deep-planner-plan.md` |
 | `POST /v1/plan/week` | **Deep planner — deterministic, no Claude call.** Selects the work units due in a week and packs them into free slots (`services/weeklyPlanner.js`). Window clamped to `now` **and to the deadline**, with a per-unit no-new-material cutoff (`notLastNDaysBeforeDeadline`). Spec: `deep-planner-plan.md` |
 | `POST /v1/plan/tweak` | **Deep planner** — small **content-only** edit of selected sessions (clarify objective / mark done / change duration / free-form). Runs on the **default Sonnet model** (cheap; shares the plan's work units as context), never the Opus planner. Returns `{ edits: [{ ref, title?, objective?, durationMinutes?, done?, summary }] }`. Does not reschedule. Spec: `deep-planner-plan.md` |
 | `POST /v1/calendar/ics` | **Deterministic — no Claude call.** Fetches an `.ics` feed URL and expands it into concrete event DTOs within a ≤ 90-day window. Full behaviour in §1.1a. |
@@ -745,7 +745,11 @@ The server is **stateless and OS-blind**: every request carries `now` +
 The old `/api/*` passthrough routes stay mounted (only when an API key is
 present) so the currently shipped iOS build keeps working during migration.
 Errors use a uniform `{ error: { code, message } }` envelope, surfaced in
-Swift as `AIServiceError.serverError`.
+Swift as `AIServiceError.serverError`. Codes: `BAD_REQUEST` (400),
+`AI_UNPARSEABLE` / `AI_TRUNCATED` / `AI_UPSTREAM` (502), `TIMEOUT` (504),
+`INTERNAL` (500). `AI_TRUNCATED` is `stop_reason: "max_tokens"` — the JSON was
+cut mid-object, so the response is unparseable *and* the identical retry would
+truncate too; it fails immediately rather than burning a second call.
 
 ### The AI planner — `/v1/schedule/interpret`
 
@@ -785,6 +789,23 @@ Key rules (from `ai-planner.md`):
   `interpret` call ships a wider event window (`interpretHistoryDays`), unlike the
   forward-only snapshot the other routes send. This is distinct from the local
   Performance Reports screen (§4), which owns deep historical stats.
+- **Optional intent hint, and the context gating it drives** — the caller may
+  pre-declare the *kind* of request with `intentHint`: `"ask"` (read-only) or
+  `"change"` (mutating); omitting it keeps the fully automatic classification.
+  Two coarse modes rather than all ten intents, because read-only vs mutating is
+  both the boundary the model actually confuses *and* the boundary that decides
+  which context blocks the payload needs: under `"ask"` the server ships no
+  `FREE_SLOTS` (and skips computing them — nothing read-only can place
+  anything); under `"change"` it ships no `STATS` / `RECENT_PAST` / `NEXT_UP`.
+  Those are full-price uncached tokens on every call, so this is where the
+  saving is. The hint lives in the **payload**, never in the system prompt —
+  branching the prompt would fork the cache prefix per branch (see §"System
+  Prompt Strategy"). The prompt is told which blocks are absent and must return
+  `clarify` if the request contradicts the hint, so a mis-set toggle is visible
+  rather than silently wrong. `AIInputView` exposes it as an Auto / Ask / Change
+  picker (**Auto by default**); `AskCadenceIntent` (Siri) hard-wires `.ask`,
+  since that entry point is read-only by construction. Design + cost arithmetic:
+  `prompt-caching-plan.md`.
 - **Clarify over guessing** — when the target event or time is ambiguous, the
   prompt is hardened to return `clarify` instead of a wrong mutation.
 - **Always-confirm** — every mutating intent renders a preview card in
@@ -946,12 +967,43 @@ Store a short, pre-formatted preferences string that gets prepended to every Cla
 Prefs: WorkHours=9-18, BufferBetweenEvents=15min, PriorityCategories=[Study,Work], MealsPerDay=3, AvoidScheduling=[Sat morning]
 ```
 
-Regenerate this string only when the user updates preferences — not on every API call.
+In practice the server rebuilds this line per request from `PrefsSnapshotDTO`
+(`contextBuilder.js`, `prefsLine`) — it's cheap, and it keeps the device the
+source of truth. It deliberately sits in the **payload**, not the cached system
+prefix: a 30-token span can't form its own cacheable prefix anyway (see
+§"System Prompt Strategy"), so there is nothing to gain by freezing it.
 
 #### System Prompt Strategy
 - All system prompts live **server-side** in `server/prompts/index.js` — the client never holds or builds a prompt
 - Each defines Claude's role, output format (always structured JSON, except the plain-text habit insight), and constraints
 - Never regenerate them dynamically — they're static until deliberately updated
+
+**Prompt caching** makes that last rule load-bearing rather than merely tidy.
+`server/lib/claude.js` puts a single `cache_control` breakpoint at the end of the
+system prompt, so the prompt is the cached prefix and everything volatile (`NOW`,
+`SCHEDULE`, `FREE_SLOTS`, `PREFS`, `USER_REQUEST`) is in the user payload after
+it. Cache reads bill about a tenth of normal input. Consequences worth knowing
+before touching prompt assembly:
+
+- **Caching is a byte-exact prefix match.** Interpolating anything per-request
+  into a system prompt — a timestamp, a user id, a conditional section — makes
+  every call a cache miss. `NOW` is in the payload for exactly this reason.
+- **Never branch a system prompt on a request field.** Each combination is a
+  separate prefix. This is why the `intentHint` is a payload line and not a
+  per-intent prompt — and why *shrinking* interpret's prompt per intent would
+  cost ~4× more than leaving it long and cached, since a ~850-token prompt also
+  falls under the model's minimum cacheable prefix. Arithmetic in
+  `prompt-caching-plan.md`.
+- **One cached prefix, shared by all users.** Caches are workspace-scoped and the
+  server holds one API key, so every user's `interpret` call reads the same
+  entry — no per-user warm-up, and no reason for a per-user breakpoint.
+- The marker is applied to every route unconditionally; prompts under the model's
+  minimum (everything but `interpret` and `planSkeleton`) silently don't cache and
+  pay no write premium, so there is no per-route decision to maintain.
+- **Verify from the logs, not by assumption.** Every call logs
+  `in=… cache_write=… cache_read=… out=…`; both cache fields at 0 across repeated
+  calls means caching broke. A caching regression keeps every request succeeding
+  and only shows up on the bill, so re-check after any change here.
 
 #### Output Format Contract
 Always instruct Claude to return a strict JSON schema. Example for event scheduling:

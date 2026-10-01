@@ -10,11 +10,17 @@
  * followed by a per-intent call. DRY with the other routes lives at the
  * parser/builder level (shared EventDraft/alternatives parsing, shared slot
  * labels) — not by doubling latency and cost with two round trips.
+ *
+ * Because of that, an optional `intentHint` does NOT select a different prompt:
+ * the system prompt stays one frozen, cacheable string shared by every request
+ * (branching it would fork the cache prefix per branch). The hint rides in the
+ * payload, after the breakpoint, where it costs a handful of tokens and decides
+ * which context blocks are worth building. prompt-caching-plan.md.
  */
 
 const express = require("express");
 const { callAndParse, OPUS } = require("../lib/claude");
-const { parseBase, parsePrefs, parseEvent, parseEventList, requireString, parseHistory } = require("../lib/dto");
+const { parseBase, parsePrefs, parseEvent, parseEventList, requireString, parseHistory, parseIntentHint } = require("../lib/dto");
 const { badRequest } = require("../lib/errors");
 const { parseISO, ymd } = require("../lib/time");
 const scheduler = require("../services/scheduler");
@@ -91,25 +97,35 @@ function createV1Router({ callClaude, fetchImpl = globalThis.fetch }) {
   router.post("/schedule/interpret", wrap(async (req, res) => {
     const c = ctx(req.body);
     const text = requireString(req.body, "text");
-    const freeSlots = slots(c, 7 * 24);
+    // "ask" = read-only question, "change" = mutate something, null = classify freely.
+    const intentHint = parseIntentHint(req.body.intentHint);
     const { text: scheduleText, idMap } = scheduler.compactScheduleWithIds({
       events: c.events,
       windowStart: c.now,
       windowEnd: c.now.plus({ days: 7 }),
       prefs: c.prefs,
     });
-    // Read-only overview + history for the "summarize" intent (numbers computed
-    // here, never by the model). Past events reach c.events because interpret
-    // ships a wider window than the other routes.
-    const statsLine = stats.buildStatsLine({ events: c.events, now: c.now });
-    const recentPast = stats.recentPastBlock({ events: c.events, now: c.now });
-    // Id-less list of events past the visible week — the "query" intent's source
-    // for "when's my next X" lookups that fall beyond the 7-day SCHEDULE window.
-    const nextUp = stats.nextUpBlock({ events: c.events, now: c.now });
+    // Everything below is payload, i.e. uncached full-price tokens on every call,
+    // so each block is built only for the intents that can actually read it. With
+    // no hint, classification is one-shot and could land anywhere — so everything
+    // ships, exactly as before. With a hint, half of it is dead weight:
+    //   • free slots are only placeable by the mutating intents;
+    //   • STATS (verified numbers for "summarize"), RECENT_PAST (history) and
+    //     NEXT_UP (beyond-the-week lookups for "query") are read-only-only — and
+    //     past events reach c.events because interpret ships a wider window.
+    const wantsSlots = intentHint !== "ask";
+    const wantsReadOnlyContext = intentHint !== "change";
+    const freeSlots = wantsSlots ? slots(c, 7 * 24) : null;
+    const statsLine = wantsReadOnlyContext ? stats.buildStatsLine({ events: c.events, now: c.now }) : "";
+    const recentPast = wantsReadOnlyContext ? stats.recentPastBlock({ events: c.events, now: c.now }) : "";
+    const nextUp = wantsReadOnlyContext ? stats.nextUpBlock({ events: c.events, now: c.now }) : "";
     // Follow-up context for the read-only answer card — the device replays recent
     // turns so "what about swimming?" resolves against the prior answer (stateless).
     const history = parseHistory(req.body.history);
-    const payload = build.buildInterpret({ now: c.now, text, scheduleText, freeSlots, prefs: c.prefs, statsLine, recentPast, nextUp, history });
+    const payload = build.buildInterpret({
+      now: c.now, text, scheduleText, freeSlots, prefs: c.prefs,
+      statsLine, recentPast, nextUp, history, intentHint,
+    });
     const decision = await callAndParse(callClaude, { system: prompts.interpret, payload },
       (raw) => parsers.parseInterpret(raw, { zone: c.zone, idMap }));
     res.json(decision);

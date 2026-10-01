@@ -2,8 +2,8 @@
  * Uniform error envelope (BACKEND_PLAN.md §3):
  *   { "error": { "code": "...", "message": "..." } }
  *
- * Codes: BAD_REQUEST (400) | AI_UNPARSEABLE (502) | AI_UPSTREAM (502)
- *      | TIMEOUT (504) | INTERNAL (500)
+ * Codes: BAD_REQUEST (400) | AI_UNPARSEABLE (502) | AI_TRUNCATED (502)
+ *      | AI_UPSTREAM (502) | TIMEOUT (504) | INTERNAL (500)
  */
 
 class ApiError extends Error {

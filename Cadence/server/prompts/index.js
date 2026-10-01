@@ -91,6 +91,7 @@ The user payload contains:
   A final NEEDS_RESCHEDULING line may list missed or set-aside events by title — these occupy no time and are the natural targets of the "reschedule" intent.
 - FREE_SLOTS: free windows you may schedule into.
 - USER_REQUEST: what the user typed, verbatim.
+- INTENT_HINT (when present): the user pre-selected the KIND of request before sending. "ask" means they are asking about their schedule (a read-only "query" or "summarize"); "change" means they want events created, moved, edited or removed. When it is absent, classify freely from USER_REQUEST alone.
 - CATEGORIES: the user's existing category names, when any exist.
 - PREFS: working hours, buffer between events, and other standing preferences.
 - STATS: precomputed, VERIFIED analytics — upcoming-week totals (count, per-category count+hours, busiest day) and past-30-day status counts (completed/missed/displaced). When a request needs numbers, take them from STATS; never count events yourself.
@@ -138,6 +139,7 @@ Payload per intent:
 Rules:
 - Every request in this box is about the user's own events — always resolve it to one of the intents above. Use "clarify" only when genuinely ambiguous; never reply that you can't do it.
 - Always act on USER_REQUEST. When CONVERSATION is present, read it only to interpret what USER_REQUEST refers to — do not re-answer or re-do an earlier turn.
+- INTENT_HINT, when present, settles the read-only/mutating question: with "ask" choose "query" or "summarize"; with "change" choose one of add/move/reschedule/reorganize/edit/delete/generate. Only the blocks that kind of request needs are included in the payload — under "ask" there are no FREE_SLOTS, so you cannot place anything; under "change" there is no STATS/RECENT_PAST/NEXT_UP, so you have no verified numbers or history to report. If USER_REQUEST plainly contradicts the hint, do not guess past the missing blocks and do not answer the other kind anyway: return "clarify", naming what you would need. "clarify" is always available under either hint.
 - When the user is ASKING ABOUT their schedule rather than asking to change it, choose between the two read-only intents: "query" for ONE specific fact (a next/last occurrence, an availability check, a single event's time), "summarize" for an overview or analytics/counts. If they want something moved, added, edited, or removed, pick the matching action intent instead — never query or summarize.
 - PREFER "clarify" OVER GUESSING: if the target event is ambiguous (two events could match), or a move has no stated/inferable time, ask. A wrong guess is worse than a question. Give 2–4 concrete options.
 - targetEventId values MUST be ids that appear in SCHEDULE, e.g. "E3". Never invent ids.

@@ -84,4 +84,21 @@ function parseHistory(raw) {
     .slice(-MAX_HISTORY_TURNS);
 }
 
-module.exports = { parseBase, parsePrefs, parseEvent, parseEventList, requireString, parseHistory, MAX_HISTORY_TURNS };
+// Optional intent hint for /v1/schedule/interpret. The user may pre-declare that
+// they are asking *about* the schedule ("ask") or asking to *change* it ("change");
+// omitting it keeps the fully automatic classification. It is deliberately two
+// coarse modes rather than all ten intents: the read-only/mutating boundary is the
+// one the model actually confuses (hence interpret's long query-vs-summarize
+// rules), and it is the boundary that decides which context blocks a payload
+// needs. See prompt-caching-plan.md §"The intent hint".
+const INTENT_HINTS = ["ask", "change"];
+
+/** Lenient: an unknown value means "no hint", not a 400. */
+function parseIntentHint(raw) {
+  return typeof raw === "string" && INTENT_HINTS.includes(raw) ? raw : null;
+}
+
+module.exports = {
+  parseBase, parsePrefs, parseEvent, parseEventList, requireString,
+  parseHistory, MAX_HISTORY_TURNS, parseIntentHint, INTENT_HINTS,
+};

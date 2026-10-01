@@ -5,18 +5,22 @@
  *    tests never hit the network (same trick as `_callAPI` in the Swift client).
  *  - callAndParse(...) — the retry-once rule (BACKEND_PLAN.md §3): one retry on
  *    unparseable model output before surfacing AI_UNPARSEABLE.
+ *
+ * `system` stays a plain string across that interface; the cache breakpoint is
+ * applied here, in the one place that talks to the SDK (prompt-caching-plan.md).
  */
 
 const Anthropic = require("@anthropic-ai/sdk");
 const { ApiError, ParseError } = require("./errors");
 
-const MODEL = "claude-sonnet-4-6"; // default: the fast "secretary box" routes
-const MAX_TOKENS = 2048; // reorganize/generate payloads are larger than the old 1024
+const MODEL = "claude-sonnet-5"; // default: the fast "secretary box" routes
+const MAX_TOKENS = 4096; // a generated week of events runs well past the old 2048
 
 // Deep planner (deep-planner-plan.md): quality-over-price. Opus + adaptive thinking
 // + high effort is the one place plan quality compounds. budget_tokens is removed
-// on Opus 4.8 (400s); adaptive thinking is OFF unless set explicitly.
-const OPUS = "claude-opus-4-8";
+// on the Opus 5 family; adaptive thinking is ON by default on Opus 5, and we set it
+// explicitly anyway so the intent is readable.
+const OPUS = "claude-opus-5";
 
 /** Strip markdown code fences Claude sometimes wraps JSON responses in. */
 const stripFences = (text) =>
@@ -26,6 +30,23 @@ const stripFences = (text) =>
  *  (empty text under the default display), so we can't assume index 0. */
 const firstText = (response) =>
   (response.content ?? []).find((b) => b?.type === "text" && typeof b.text === "string" && b.text.length > 0)?.text;
+
+/**
+ * One line per call, so caching can actually be verified instead of assumed
+ * (prompt-caching-plan.md §"Verifying it works"). The fields that matter:
+ *   cache_write > 0 → this call created the entry, cache_read > 0 → it hit one,
+ *   both 0 → the prefix is under the model's minimum, or something changed it.
+ * `stop` is here for the other half of that doc: stop=max_tokens is the signature
+ * of a truncated generation, which no amount of retrying will fix.
+ */
+function logUsage(model, response) {
+  const u = response.usage ?? {};
+  console.log(
+    `[claude] ${model} stop=${response.stop_reason}` +
+    ` in=${u.input_tokens ?? 0} cache_write=${u.cache_creation_input_tokens ?? 0}` +
+    ` cache_read=${u.cache_read_input_tokens ?? 0} out=${u.output_tokens ?? 0}`
+  );
+}
 
 function createClaudeCaller({ apiKey, model = MODEL, maxTokens = MAX_TOKENS } = {}) {
   const anthropic = new Anthropic({ apiKey });
@@ -37,7 +58,14 @@ function createClaudeCaller({ apiKey, model = MODEL, maxTokens = MAX_TOKENS } = 
     const params = {
       model: modelOverride ?? model,
       max_tokens: maxTokensOverride ?? maxTokens,
-      system,
+      // The one cache breakpoint. The system prompt is the longest byte-identical
+      // span in the request and it is shared by every user of this server (caches
+      // are scoped per workspace and we hold a single API key), so a hot prefix
+      // needs no per-user warm-up. Everything volatile — NOW, schedule, free
+      // slots, the request itself — is in `payload`, i.e. after the breakpoint.
+      // A prompt below the model's minimum cacheable prefix simply doesn't cache:
+      // no error, and no write premium either, so marking unconditionally is safe.
+      system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content: payload }],
     };
     if (thinking) params.thinking = { type: "adaptive" };
@@ -53,6 +81,13 @@ function createClaudeCaller({ apiKey, model = MODEL, maxTokens = MAX_TOKENS } = 
       console.error("Claude upstream error:", err?.status ?? "", err?.message ?? err);
       throw new ApiError("AI_UPSTREAM", "AI request failed.", 502);
     }
+    logUsage(params.model, response);
+    // Hitting the ceiling truncates the JSON mid-object, so the parse is doomed
+    // and so is the identical retry. Fail loudly here instead of burning a second
+    // call to arrive at a misleading AI_UNPARSEABLE.
+    if (response.stop_reason === "max_tokens") {
+      throw new ApiError("AI_TRUNCATED", "The AI response was cut off before it finished.", 502);
+    }
     const text = firstText(response);
     if (!text) throw new ApiError("AI_UPSTREAM", "Empty model response.", 502);
     return stripFences(text);
@@ -62,6 +97,8 @@ function createClaudeCaller({ apiKey, model = MODEL, maxTokens = MAX_TOKENS } = 
 /**
  * Call Claude and parse; on ParseError, retry the identical call once.
  * A second ParseError propagates and the error handler maps it to AI_UNPARSEABLE.
+ * The retry re-sends byte-identical bytes, so it reads the cache the first call
+ * wrote — the retry-once rule costs roughly a tenth of a fresh call.
  */
 async function callAndParse(callClaude, opts, parse) {
   const first = await callClaude(opts);

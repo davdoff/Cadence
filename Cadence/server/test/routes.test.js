@@ -7,6 +7,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { createApp } = require("../app");
 const { parseHistory, MAX_HISTORY_TURNS } = require("../lib/dto");
+const { OPUS } = require("../lib/claude");
 
 /** Boot the app on an ephemeral port; returns a JSON-speaking client. */
 function boot(fakeClaude) {
@@ -127,6 +128,77 @@ test("POST /v1/schedule/interpret without history renders no CONVERSATION block"
     const { status } = await post("/v1/schedule/interpret", { ...BASE_REQ, text: "hi", history: "not-an-array" });
     assert.equal(status, 200);
     assert.doesNotMatch(seen, /CONVERSATION/);
+  } finally { close(); }
+});
+
+test("POST /v1/schedule/interpret: no intentHint ships every context block", async () => {
+  let seen;
+  const fake = async ({ payload }) => {
+    seen = payload;
+    return JSON.stringify({ intent: "query", interpretation: "x", payload: { answer: "a" } });
+  };
+  const { post, close } = boot(fake);
+  try {
+    await post("/v1/schedule/interpret", { ...BASE_REQ, text: "how's my week?" });
+    // Classification is one-shot and could land on any intent, so nothing is withheld.
+    assert.match(seen, /FREE_SLOTS:/);
+    assert.match(seen, /STATS:/);
+    assert.doesNotMatch(seen, /INTENT_HINT/);
+  } finally { close(); }
+});
+
+test('POST /v1/schedule/interpret intentHint "ask" drops FREE_SLOTS, keeps the read-only context', async () => {
+  let seen;
+  const fake = async ({ payload }) => {
+    seen = payload;
+    return JSON.stringify({ intent: "summarize", interpretation: "x", payload: { summary: "s" } });
+  };
+  const { post, close } = boot(fake);
+  try {
+    const { status } = await post("/v1/schedule/interpret",
+      { ...BASE_REQ, text: "how's my week?", intentHint: "ask" });
+    assert.equal(status, 200);
+    assert.match(seen, /INTENT_HINT: ask/);
+    assert.doesNotMatch(seen, /FREE_SLOTS:/); // nothing to place — pure full-price waste
+    assert.match(seen, /STATS:/);             // verified numbers are what "summarize" runs on
+  } finally { close(); }
+});
+
+test('POST /v1/schedule/interpret intentHint "change" drops STATS/RECENT_PAST/NEXT_UP, keeps FREE_SLOTS', async () => {
+  let seen;
+  const fake = async ({ payload }) => {
+    seen = payload;
+    return JSON.stringify({
+      intent: "add", interpretation: "x",
+      payload: { event: { title: "T", start: "2026-07-07T09:00:00+03:00", end: "2026-07-07T10:00:00+03:00", category: "Admin" }, conflictReason: null, alternatives: [] },
+    });
+  };
+  const { post, close } = boot(fake);
+  try {
+    const { status } = await post("/v1/schedule/interpret",
+      { ...BASE_REQ, text: "dentist friday 2pm", intentHint: "change" });
+    assert.equal(status, 200);
+    assert.match(seen, /INTENT_HINT: change/);
+    assert.match(seen, /FREE_SLOTS:/);
+    assert.doesNotMatch(seen, /STATS:/);
+    assert.doesNotMatch(seen, /RECENT_PAST:/);
+    assert.doesNotMatch(seen, /NEXT_UP:/);
+  } finally { close(); }
+});
+
+test("POST /v1/schedule/interpret: an unknown intentHint is ignored, not a 400", async () => {
+  let seen;
+  const fake = async ({ payload }) => {
+    seen = payload;
+    return JSON.stringify({ intent: "query", interpretation: "x", payload: { answer: "a" } });
+  };
+  const { post, close } = boot(fake);
+  try {
+    const { status } = await post("/v1/schedule/interpret",
+      { ...BASE_REQ, text: "hi", intentHint: "banana" });
+    assert.equal(status, 200);
+    assert.doesNotMatch(seen, /INTENT_HINT/);
+    assert.match(seen, /FREE_SLOTS:/); // falls back to the no-hint, everything-ships payload
   } finally { close(); }
 });
 
@@ -279,7 +351,9 @@ test("POST /v1/plan/skeleton returns plan + cushion; prompt carries deadline/wee
     assert.equal(body.capacity.cushionMinutes, 2640);
     // The deep planner uses Opus + adaptive thinking + high effort, and the
     // prompt gives the model the deadline and the weeks it must budget across.
-    assert.equal(seen.model, "claude-opus-4-8");
+    // Assert the route asks for the planner model, not a literal id — the id
+    // changes with every model bump, the "not the secretary model" rule doesn't.
+    assert.equal(seen.model, OPUS);
     assert.equal(seen.thinking, true);
     assert.equal(seen.effort, "high");
     assert.match(seen.payload, /DEADLINE: 2026-08-05/);

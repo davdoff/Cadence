@@ -138,6 +138,18 @@ struct ConversationTurn: Encodable {
     let assistant: String
 }
 
+/// Optional pre-declaration of what KIND of request this is, when the caller
+/// already knows (the user picked a mode, or the entry point is read-only by
+/// construction, like the Siri intent). Two coarse modes rather than all ten
+/// intents on purpose: read-only vs mutating is the boundary the model actually
+/// confuses, and the one that decides which context the server needs to build.
+/// Omitting it keeps the fully automatic classification.
+/// See prompt-caching-plan.md §"The intent hint".
+enum IntentHint: String, Encodable {
+    case ask     // read-only: query / summarize
+    case change  // mutating: add / move / reschedule / reorganize / edit / delete / generate
+}
+
 extension AIService {
 
     /// How much recent history interpret ships (for the "summarize" intent's
@@ -151,7 +163,8 @@ extension AIService {
         events: [Event],
         preferences: UserPreferences,
         categories: [Category],
-        history: [ConversationTurn] = []
+        history: [ConversationTurn] = [],
+        intentHint: IntentHint? = nil
     ) async throws -> AssistantDecision {
         let now = Date.now
         let iso = Self.deviceISOFormatter()
@@ -165,7 +178,9 @@ extension AIService {
             events: Self.snapshots(events, now: now, iso: iso, historyDays: Self.interpretHistoryDays),
             prefs: PrefsSnapshotDTO(preferences: preferences, categories: categories),
             // Prior turns of the follow-up thread (empty for a fresh question).
-            history: history
+            history: history,
+            // nil is omitted from the JSON, which the server reads as "classify freely".
+            intentHint: intentHint?.rawValue
         )
         let body = try JSONEncoder().encode(request)
         let responseData = try await exchange(route: "/v1/schedule/interpret", body: body)
@@ -242,6 +257,7 @@ private struct InterpretRequest: Encodable {
     let events: [EventSnapshotDTO]
     let prefs: PrefsSnapshotDTO
     let history: [ConversationTurn]
+    let intentHint: String?
 }
 
 /// Flat union as returned by the server's parseInterpret — the intent decides

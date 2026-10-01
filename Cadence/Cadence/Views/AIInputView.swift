@@ -25,6 +25,35 @@ struct AIInputView: View {
     // the (stateless) server so refinements resolve against the last answer.
     @State private var turns: [ConversationTurn] = []
     @State private var followUpText = ""
+    // Optional pre-declaration of the kind of request, so the model doesn't have
+    // to infer the read-only/mutating boundary and the server can skip the context
+    // the other kind would need. Auto (no hint) stays the default.
+    @State private var mode: AskMode = .auto
+
+    /// UI face of `IntentHint`, plus the "let the model decide" case.
+    private enum AskMode: String, CaseIterable, Identifiable {
+        case auto = "Auto"
+        case ask = "Ask"
+        case change = "Change"
+
+        var id: Self { self }
+
+        var hint: IntentHint? {
+            switch self {
+            case .auto:   return nil
+            case .ask:    return .ask
+            case .change: return .change
+            }
+        }
+
+        var help: String {
+            switch self {
+            case .auto:   return "Cadence works out what you meant."
+            case .ask:    return "Questions about your schedule — nothing is changed."
+            case .change: return "Add, move, edit or cancel events."
+            }
+        }
+    }
 
     private static let exampleChips = [
         "move my gym to tomorrow morning",
@@ -43,6 +72,7 @@ struct AIInputView: View {
                 theme.backgroundGradient.ignoresSafeArea()
                 ScrollView {
                     VStack(spacing: 16) {
+                        modePicker
                         inputRow
                         planPeriodButton
 
@@ -92,6 +122,22 @@ struct AIInputView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .disabled(isLoading)
+    }
+
+    // MARK: - Mode picker
+
+    private var modePicker: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Picker("Kind of request", selection: $mode) {
+                ForEach(AskMode.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .disabled(isLoading)
+
+            Text(mode.help)
+                .font(.caption2)
+                .foregroundColor(theme.light)
+        }
     }
 
     // MARK: - Input row
@@ -655,6 +701,7 @@ struct AIInputView: View {
         let prefs   = prefsResults.first ?? UserPreferences()
         let events  = allEvents
         let cats    = Array(categories)
+        let hint    = mode.hint
 
         Task {
             do {
@@ -663,7 +710,8 @@ struct AIInputView: View {
                     events: events,
                     preferences: prefs,
                     categories: cats,
-                    history: history
+                    history: history,
+                    intentHint: hint
                 )
                 await MainActor.run {
                     if case .clarify = result {

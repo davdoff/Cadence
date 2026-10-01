@@ -57,7 +57,11 @@ struct AskCadenceIntent: AppIntent {
                         text: trimmed,
                         events: events,
                         preferences: preferences,
-                        categories: categories
+                        categories: categories,
+                        // This intent can only ever speak a read-only reply, so
+                        // say so: the server then skips the free-slot context no
+                        // answer here could use.
+                        intentHint: .ask
                     )
                     // Read-only cases (.query / .summarize) carry a ready-made
                     // spoken answer. Everything else — including .clarify's

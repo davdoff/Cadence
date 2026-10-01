@@ -70,12 +70,17 @@ DEADLINE: ${ymd(deadline)}
 WEEKLY_HOURS: ${weeklyHours}
 CONSTRAINTS: "${constraints}"`);
 
-const buildInterpret = ({ now, text, scheduleText, freeSlots, prefs, statsLine = "", recentPast = "", nextUp = "", history = [] }) => {
+const buildInterpret = ({ now, text, scheduleText, freeSlots = null, prefs, statsLine = "", recentPast = "", nextUp = "", history = [], intentHint = null }) => {
   const categoriesLine =
     prefs.allCategories.length > 0 ? `\nCATEGORIES: [${prefs.allCategories.join(", ")}]` : "";
-  // STATS + RECENT_PAST feed the read-only "summarize" intent; NEXT_UP feeds the
-  // read-only "query" intent's beyond-the-week lookups (all from stats.js). They
-  // ride on every interpret payload because classification is one-shot.
+  // Which blocks ride along is decided by the caller, not here: with no intent
+  // hint every block is present (classification is one-shot and could land on
+  // any intent), while a hinted request gets only what that kind of intent can
+  // use — no FREE_SLOTS for "ask", no STATS/RECENT_PAST/NEXT_UP for "change".
+  // These are full-price tokens on every call: they sit after the cache
+  // breakpoint and are never reused. prompt-caching-plan.md §"The intent hint".
+  const freeSlotsPart = freeSlots ? `\nFREE_SLOTS: ${slotsLine(freeSlots)}` : "";
+  const hintPart = intentHint ? `\nINTENT_HINT: ${intentHint}` : "";
   const statsPart = statsLine ? `\n${statsLine}` : "";
   const recentPart = recentPast ? `\n${recentPast}` : "";
   const nextUpPart = nextUp ? `\n${nextUp}` : "";
@@ -87,9 +92,8 @@ const buildInterpret = ({ now, text, scheduleText, freeSlots, prefs, statsLine =
         .join("\n")}\n`
     : "";
   return withNow(now, `${conversationPart}SCHEDULE:
-${scheduleText}
-FREE_SLOTS: ${slotsLine(freeSlots)}
-USER_REQUEST: "${text}"${categoriesLine}
+${scheduleText}${freeSlotsPart}
+USER_REQUEST: "${text}"${hintPart}${categoriesLine}
 PREFS: ${prefsLine(prefs)}${statsPart}${recentPart}${nextUpPart}`);
 };
 
