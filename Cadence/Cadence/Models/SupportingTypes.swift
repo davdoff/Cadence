@@ -69,7 +69,8 @@ struct HabitWeekSummary {
 }
 
 enum EventSource: String, Codable {
-    case manual, ai, imported
+    // Stored on Event — append new cases only, never reorder.
+    case manual, ai, imported, template
 }
 
 struct RecurrenceRule: Codable, Equatable {

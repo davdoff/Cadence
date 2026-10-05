@@ -8,6 +8,11 @@ import SwiftData
 ///
 /// The sheet only collects input and fetches the plan; the confirm/insert
 /// step stays in AIInputView's generate card, so nothing is written from here.
+///
+/// Templates mode (day-templates.md) is the local, zero-AI alternative: pick a
+/// day template per day (or fill the days from a saved week layout), then
+/// `TemplatePreviewView` shows where everything lands and does its own confirm,
+/// because its per-clash "move my event instead" toggles need their own screen.
 struct GeneratePlanSheet: View {
     @Environment(\.theme) private var theme
     @Environment(\.dismiss) private var dismiss
@@ -15,6 +20,9 @@ struct GeneratePlanSheet: View {
     @Query(sort: \Event.startTime) private var allEvents: [Event]
     @Query private var prefsResults: [UserPreferences]
     @Query private var categories: [Category]
+    @Query(sort: \DayTemplate.name) private var templates: [DayTemplate]
+    @Query(sort: \WeekTemplate.name) private var weekTemplates: [WeekTemplate]
+    @Environment(\.modelContext) private var context
 
     /// Called with (interpretation, drafts) when a plan comes back non-empty.
     let onPlan: (String, [EventDraft]) -> Void
@@ -26,6 +34,21 @@ struct GeneratePlanSheet: View {
     @State private var goals = ""
     @State private var isLoading = false
     @State private var errorMessage: String?
+
+    private enum Mode: String, CaseIterable, Identifiable {
+        case goals = "Goals (AI)"
+        case templates = "Templates"
+        var id: Self { self }
+    }
+    @State private var mode: Mode = .goals
+    /// Start-of-day → chosen DayTemplate id. Days outside the range are ignored.
+    @State private var dayAssignments: [Date: UUID] = [:]
+    @State private var showPreview = false
+    @State private var showSaveWeek = false
+    @State private var weekName = ""
+
+    /// Longest range Templates mode lists day by day.
+    private static let maxTemplateDays = 31
 
     private struct QuickRange {
         let label: String
@@ -55,24 +78,47 @@ struct GeneratePlanSheet: View {
                 theme.backgroundGradient.ignoresSafeArea()
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
+                        Picker("Mode", selection: $mode) {
+                            ForEach(Mode.allCases) { Text($0.rawValue).tag($0) }
+                        }
+                        .pickerStyle(.segmented)
+                        .disabled(isLoading)
+
                         quickRangeRow
                         periodCard
-                        goalsCard
 
-                        if let error = errorMessage {
-                            Text(error)
-                                .font(.caption)
-                                .foregroundColor(.red)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                        switch mode {
+                        case .goals:
+                            goalsCard
+
+                            if let error = errorMessage {
+                                Text(error)
+                                    .font(.caption)
+                                    .foregroundColor(.red)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+
+                            generateButton
+                        case .templates:
+                            templatesCard
+                            previewButton
                         }
-
-                        generateButton
                     }
                     .padding()
                 }
             }
             .navigationTitle("Plan a Period")
             .navigationBarTitleDisplayMode(.inline)
+            .navigationDestination(isPresented: $showPreview) {
+                TemplatePreviewView(assignments: chosenAssignments) { dismiss() }
+            }
+            .alert("Save week layout", isPresented: $showSaveWeek) {
+                TextField("Name", text: $weekName)
+                Button("Save") { saveWeekLayout() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Remembers which template each weekday uses, to fill any week in one tap.")
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -156,6 +202,146 @@ struct GeneratePlanSheet: View {
 
     private var canSubmit: Bool {
         !goals.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    // MARK: - Templates mode
+
+    /// Each day in the picked range (capped), as start-of-day dates.
+    private var rangeDays: [Date] {
+        let cal = Calendar.current
+        let first = cal.startOfDay(for: startDate)
+        let last = cal.startOfDay(for: endDate)
+        var days: [Date] = []
+        var day = first
+        while day <= last && days.count < Self.maxTemplateDays {
+            days.append(day)
+            day = cal.date(byAdding: .day, value: 1, to: day)!
+        }
+        return days
+    }
+
+    /// The days that have a template picked, paired with it, in date order.
+    private var chosenAssignments: [(day: Date, template: DayTemplate)] {
+        rangeDays.compactMap { day in
+            guard let id = dayAssignments[day],
+                  let template = templates.first(where: { $0.id == id }) else { return nil }
+            return (day: day, template: template)
+        }
+    }
+
+    @ViewBuilder
+    private var templatesCard: some View {
+        if templates.isEmpty {
+            Text("No day templates yet. Create one in Settings › Scheduling › Day templates.")
+                .font(.caption)
+                .foregroundColor(theme.text2)
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .cardStyle()
+        } else {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("Template per day")
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(theme.text2)
+                    Spacer()
+                    weekLayoutMenu
+                }
+                ForEach(rangeDays, id: \.self) { day in
+                    HStack {
+                        Text(TemplatePreviewView.dayLabel(day))
+                            .font(.subheadline)
+                        Spacer()
+                        Picker("Template", selection: assignmentBinding(for: day)) {
+                            Text("None").tag(UUID?.none)
+                            ForEach(templates) { Text($0.name).tag(UUID?.some($0.id)) }
+                        }
+                        .pickerStyle(.menu)
+                        .tint(theme.accent)
+                    }
+                }
+                if Calendar.current.dateComponents([.day], from: startDate, to: endDate).day ?? 0 >= Self.maxTemplateDays {
+                    Text("Showing the first \(Self.maxTemplateDays) days.")
+                        .font(.caption2).foregroundColor(theme.text2)
+                }
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .cardStyle()
+        }
+    }
+
+    private var weekLayoutMenu: some View {
+        Menu {
+            if !weekTemplates.isEmpty {
+                Section("Fill from week layout") {
+                    ForEach(weekTemplates) { week in
+                        Button(week.name) { fill(from: week) }
+                    }
+                }
+            }
+            Button {
+                weekName = ""
+                showSaveWeek = true
+            } label: {
+                Label("Save as week layout", systemImage: "square.and.arrow.down")
+            }
+            .disabled(chosenAssignments.isEmpty)
+            Button(role: .destructive) { dayAssignments = [:] } label: {
+                Label("Clear all", systemImage: "xmark")
+            }
+        } label: {
+            Label("Week layout", systemImage: "calendar")
+                .font(.caption.weight(.semibold))
+                .foregroundColor(theme.accent)
+        }
+    }
+
+    private var previewButton: some View {
+        Button {
+            showPreview = true
+        } label: {
+            Text("Preview")
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 13)
+        }
+        .background(chosenAssignments.isEmpty ? AnyShapeStyle(theme.light) : AnyShapeStyle(theme.accentGradient))
+        .foregroundColor(.white)
+        .font(.subheadline.weight(.semibold))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .disabled(chosenAssignments.isEmpty)
+    }
+
+    private func assignmentBinding(for day: Date) -> Binding<UUID?> {
+        Binding(
+            get: { dayAssignments[day] },
+            set: { dayAssignments[day] = $0 }
+        )
+    }
+
+    /// Sets every day in the range from the layout's weekday mapping; weekdays
+    /// the layout leaves empty (or whose template was deleted) become None.
+    private func fill(from week: WeekTemplate) {
+        let cal = Calendar.current
+        for day in rangeDays {
+            let id = week.templateID(forWeekday: cal.component(.weekday, from: day))
+            dayAssignments[day] = templates.contains(where: { $0.id == id }) ? id : nil
+        }
+    }
+
+    /// Stores the current picks as a weekday pattern. When the range holds the
+    /// same weekday twice, the first one wins.
+    private func saveWeekLayout() {
+        let cal = Calendar.current
+        var assignments: [WeekdayAssignment] = []
+        for (day, template) in chosenAssignments {
+            let weekday = cal.component(.weekday, from: day)
+            guard !assignments.contains(where: { $0.weekday == weekday }) else { continue }
+            assignments.append(WeekdayAssignment(weekday: weekday, templateID: template.id))
+        }
+        let trimmed = weekName.trimmingCharacters(in: .whitespaces)
+        context.insert(WeekTemplate(name: trimmed.isEmpty ? "Week layout" : trimmed, assignments: assignments))
+        try? context.save()
     }
 
     // MARK: - Actions

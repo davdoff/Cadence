@@ -99,6 +99,11 @@ struct SettingsView: View {
                         step: 5,
                         display: "\(Int(bufferMinutes)) min"
                     )
+                    NavigationLink {
+                        DayTemplatesView()
+                    } label: {
+                        Label("Day templates", systemImage: "square.grid.2x2")
+                    }
                 }
 
                 // AI

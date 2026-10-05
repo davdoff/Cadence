@@ -742,20 +742,11 @@ struct AIInputView: View {
     }
 
     private func insertDrafts(_ drafts: [EventDraft]) {
-        let prefs = prefsResults.first ?? UserPreferences()
-        let svc = NotificationService()
-        for draft in drafts {
-            let matched = categories.first { $0.name.lowercased() == draft.categoryName.lowercased() }
-            let event = Event(
-                title: draft.title.isEmpty ? description : draft.title,
-                startTime: draft.start,
-                endTime: draft.end,
-                category: matched,
-                source: .ai
-            )
-            context.insert(event)
-            scheduleNotifications(for: event, prefs: prefs, svc: svc)
-        }
+        EventApplyService.insert(
+            drafts, source: .ai, fallbackTitle: description,
+            prefs: prefsResults.first ?? UserPreferences(),
+            categories: Array(categories), context: context
+        )
         finalize()
     }
 
@@ -763,15 +754,11 @@ struct AIInputView: View {
     /// displaced events, in one save.
     private func applyMoves(_ moves: [PlannedMove], displacing displaced: [UUID] = []) {
         let prefs = prefsResults.first ?? UserPreferences()
-        let svc = NotificationService()
         for move in moves {
             guard let event = allEvents.first(where: { $0.id == move.targetEventID }) else { continue }
-            svc.cancelEventNotifications(for: event)
-            event.startTime = move.newStart
-            event.endTime = move.newEnd
-            event.status = .pending
-            scheduleNotifications(for: event, prefs: prefs, svc: svc)
+            EventApplyService.move(event, to: move.newStart, end: move.newEnd, prefs: prefs)
         }
+        let svc = NotificationService()
         for id in displaced {
             guard let event = allEvents.first(where: { $0.id == id }) else { continue }
             svc.cancelEventNotifications(for: event)
@@ -787,21 +774,18 @@ struct AIInputView: View {
     /// save.
     private func applyEdits(_ edits: [EventEdit]) {
         let prefs = prefsResults.first ?? UserPreferences()
-        let svc = NotificationService()
         for edit in edits {
             guard let event = allEvents.first(where: { $0.id == edit.targetEventID }) else { continue }
             if let title = edit.title?.trimmingCharacters(in: .whitespaces), !title.isEmpty {
                 event.title = title
             }
             if let name = edit.category {
-                event.category = resolveOrCreateCategory(named: name)
+                event.category = EventApplyService.resolveOrCreateCategory(
+                    named: name, in: Array(categories), context: context
+                )
             }
             if edit.changesTime, let newStart = edit.newStart, let newEnd = edit.newEnd {
-                svc.cancelEventNotifications(for: event)
-                event.startTime = newStart
-                event.endTime = newEnd
-                event.status = .pending
-                scheduleNotifications(for: event, prefs: prefs, svc: svc)
+                EventApplyService.move(event, to: newStart, end: newEnd, prefs: prefs)
             }
         }
         finalize()
@@ -820,34 +804,8 @@ struct AIInputView: View {
         finalize()
     }
 
-    /// Finds an existing category by case-insensitive name, or creates one when
-    /// the AI named a category that doesn't exist yet — so an edit request never
-    /// fails just because the category is new (David: never refuse an event task).
-    private func resolveOrCreateCategory(named name: String) -> Category? {
-        let trimmed = name.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return nil }
-        if let existing = categories.first(where: { $0.name.lowercased() == trimmed.lowercased() }) {
-            return existing
-        }
-        let palette = AddCategoryView.palette
-        let colorHex = palette[abs(trimmed.hashValue) % palette.count]
-        let created = Category(name: trimmed, colorHex: colorHex)
-        context.insert(created)
-        return created
-    }
-
-    private func scheduleNotifications(for event: Event, prefs: UserPreferences, svc: NotificationService) {
-        guard svc.isNotificationEnabled(for: event, prefs: prefs) else { return }
-        event.notificationIdentifier = svc.scheduleEventReminder(
-            for: event, reminderMinutes: prefs.defaultReminderMinutes
-        )
-        svc.scheduleEventStartAlert(for: event, reminderMinutes: prefs.defaultReminderMinutes)
-        svc.scheduleMissedEventAlert(for: event)
-    }
-
     private func finalize() {
-        try? context.save()
-        WidgetSync.refresh()
+        EventApplyService.finalize(context: context)
         dismiss()
     }
 

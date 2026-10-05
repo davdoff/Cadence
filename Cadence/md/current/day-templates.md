@@ -1,83 +1,78 @@
-# Day Templates — Feature Idea
+# Day Templates
+
+Status: **v1 implemented** (day + week templates, local apply, no AI).
+Shipped behaviour is described in `CADENCE_README.md` §2b; this doc keeps the
+decisions and what's still open.
 
 ## Concept
-Reusable day layouts ("Busy work day", "Sporty day", "Focused study day") that the user can stamp onto any date instead of recreating or regenerating the same events.
+Reusable day layouts ("Busy work day", "Sporty day", "Focused study day")
+stamped onto any date instead of recreating or regenerating the same events.
+Applying a template is fully local: no API call, zero cost.
 
-- **Applying a template is fully local** — no API call, zero cost.
-- **AI is only used to create a template** from a description — one call per template, not per use.
+## Decisions (v1)
 
-## User flows
-1. **Save today as a template** — take an existing day's events and store them as a template.
-2. **Build a template manually** — add blocks (title, start time, duration, category).
-3. **Generate a template with AI** — describe the day in words; Claude returns the blocks; user reviews and saves.
-4. **Apply a template** — pick a template + a date (or several dates); events are created on those days.
+**Where it lives.**
+- Applying happens in the existing **Plan a period…** sheet (Ask AI), behind a
+  *Goals (AI) | Templates* switch. Filling a period is the same job either way;
+  templates are the free, deterministic way to do it.
+- The library is managed in **Settings › Scheduling › Day templates**.
+- "Save this day as a template" is **Copy from a day…** inside the template
+  editor, so Today and Schedule didn't need new UI.
+
+**Week templates.** A `WeekTemplate` is a weekday → day-template mapping. In
+Templates mode the user picks a template per day, can fill the range from a
+saved layout, or save the current picks as a new layout. Layouts point at day
+templates by id, so deleting a day template leaves that weekday empty instead
+of breaking the layout.
+
+**Clashes — David's call: auto-shift, with a per-clash override.**
+- By default the user's existing events stay put, and a clashing template
+  block slides to the nearest free gap that day. On a tie it takes the later
+  gap, so a shifted block never jumps ahead of the block before it.
+- Each clash in the preview has a **"Move <event> instead"** toggle. With it
+  on, the block keeps its template time and the existing event moves to the
+  nearest gap to where it was.
+- If the event has nowhere to go, it stays and the preview says so.
+- Imported events get `locallyEditedTime` so re-sync keeps the move. Recurring
+  events move this occurrence only.
+- Meal events are treated like any other event (this answers the old open
+  question).
+
+**Gap rules.**
+- **Buffer:** applies between template blocks and existing events, but not
+  between two template blocks, because back-to-back blocks in a template are
+  the user's intent.
+- **Search window:** the whole day, not work hours, since templates hold evening
+  gym and morning routines. Never before *now*.
+- **Avoid-blocks:** ignored, because the template is an explicit layout.
+- **Missed/displaced events:** don't block (same rule as
+  `SchedulerService.conflicts`).
+- **Nothing is dropped silently:** a block with no room is shown as skipped.
+
+**Code shape.**
+- `TemplatePlanner` is a pure service: values in, a `DayPlan` out, re-run on
+  every toggle.
+- `EventApplyService` holds the insert / move / notification / save helpers.
+  They were extracted from `AIInputView` so templates and the Ask AI confirm
+  cards write events the same way.
+- Template events get `EventSource.template`.
 
 ## Data model
-Store blocks as **relative times**, not absolute dates, so the template can land on any day.
-
 ```swift
-DayTemplate
-- id: UUID
-- name: String              // "Sporty day"
-- symbolName: String?       // optional icon
-- blocks: [TemplateBlock]
-- createdBy: TemplateSource // .manual, .savedFromDay, .ai
-- lastUsedDate: Date?
-
-TemplateBlock
-- id: UUID
-- title: String
-- startMinuteOfDay: Int     // 0–1439, e.g. 7:30 → 450
-- durationMinutes: Int
-- categoryName: String      // matched to an existing Category by name on apply
+DayTemplate   { id, name, symbolName?, blocks: [TemplateBlock], createdAt, lastUsedDate? }
+TemplateBlock { id, title, startMinuteOfDay (0–1439), durationMinutes, categoryName }
+WeekTemplate  { id, name, assignments: [WeekdayAssignment] }
+WeekdayAssignment { weekday (1 = Sun … 7 = Sat), templateID }
 ```
+All properties have inline defaults, so adding the models is a lightweight
+migration. Blocks match a category by name on apply; if the category no longer
+exists, the event gets no category.
 
-## Applying a template (local logic)
-1. For each block, compute `startTime = date + startMinuteOfDay`, `endTime = startTime + duration`.
-2. Run the existing conflict check against that day's events.
-3. Conflicts: show the user which blocks clash and let them skip, keep, or shift each — no silent overwrite.
-4. Create events with `source: .manual` (or a new `.template` source if you want to track it in reports).
-5. Schedule notifications as for any other event, then call `WidgetSync.refresh()`.
-
-Open question: should meal events from the daily pass be treated as movable when a template is applied, or block it like any other event?
-
-## AI endpoint — template generation
-New route: `POST /api/template/generate` with its own system prompt.
-
-New intent:
-```swift
-case createDayTemplate(description: String)
-```
-
-Payload (compact, no schedule needed — a template isn't tied to a date):
-```
-INTENT: create_day_template
-DESCRIPTION: "focused study day, gym in the evening, early start"
-CATEGORIES: Work, Study, Gym, Meal, Personal
-PREFS: BufferBetweenEvents=15min, WorkHours=9-18
-```
-
-Expected response (strict JSON):
-```json
-{
-  "name": "Focused Study Day",
-  "blocks": [
-    { "title": "Deep study", "start": "08:00", "durationMinutes": 120, "category": "Study" },
-    { "title": "Review notes", "start": "10:30", "durationMinutes": 60, "category": "Study" },
-    { "title": "Gym", "start": "18:00", "durationMinutes": 75, "category": "Gym" }
-  ]
-}
-```
-
-- The result opens in the template editor for review before saving — never saved blindly.
-- Unknown categories: map to an existing one or prompt the user to create it.
-- Output is small (one day), so `max_tokens` isn't a concern here.
-
-## Why this helps costs
-- Common days get reused instead of regenerated — fewer "generate week" calls.
-- A week plan could even be assembled from templates locally (Mon = Work day, Sat = Sporty day…) with no AI at all.
-
-## Possible later additions
-- **Week templates** — a template per weekday, applied in one tap.
-- Suggest a template when the user keeps creating the same set of events.
-- Show the template's blocks as a mini timeline preview before applying.
+## Not built yet
+- **AI template generation.** "Describe the day → blocks" would be one call per
+  template, not per use. It would need a server route plus a prompt
+  (`POST /v1/template/generate`, payload: description + categories + prefs, no
+  schedule), and the result would open in the editor for review, never saved
+  blindly.
+- Suggesting a template when the user keeps creating the same set of events.
+- A mini timeline preview of a template's blocks.

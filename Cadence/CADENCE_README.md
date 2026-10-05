@@ -229,6 +229,49 @@ every-X cadences), and an optional end date.
   card ("Every 2 weeks · until Jan 5", or "From imported calendar").
 - Conflict checking on save still covers only the first occurrence.
 
+### 2b. Day Templates (local — no AI)
+
+Reusable day layouts ("Work day", "Sporty day") stamped onto dates without an
+AI call — a common day gets reused instead of regenerated. Plan and reasoning:
+`day-templates.md`.
+
+- **Models** (`Models/DayTemplate.swift`, shared schema — app **and** widget
+  targets): `DayTemplate` (name, optional SF Symbol, `blocks: [TemplateBlock]`,
+  `lastUsedDate`) and `WeekTemplate` (a weekday → `DayTemplate.id` list, e.g.
+  Mon–Fri = Work day, Sat = Sporty day). Blocks store `startMinuteOfDay` +
+  `durationMinutes` + a category **name**, never absolute dates, so a template
+  lands on any day and survives category edits. Week layouts reference day
+  templates by id: deleting a day template leaves that weekday empty.
+- **Library**: Settings › Scheduling › Day templates (`DayTemplatesView`,
+  `DayTemplateEditorView`). Templates are built block by block or with
+  **Copy from a day…**, which turns a day's events into blocks (missed and
+  displaced events excluded).
+- **Applying**: Ask AI › Plan a period… › **Templates**. Pick a template per day
+  (or fill the range from a saved week layout, or save the current picks as
+  one), then **Preview** (`TemplatePreviewView`) shows where every block lands
+  and does its own confirm. Inserted events get `source = .template`.
+- **Clash rules** live in the pure `TemplatePlanner` (values in, values out —
+  the part to port to Kotlin):
+  - A block whose template time is free keeps it. A clashing block slides to
+    the **nearest free gap that day** (ties go later, so blocks keep their
+    order); the user's existing events stay put by default.
+  - Each clash offers **"Move <event> instead"**: the block keeps its time and
+    the existing event moves to the nearest gap to where it was. An event with
+    no room stays put and the preview says so. Moving an imported event sets
+    `locallyEditedTime` so re-sync keeps the new time; a recurring event moves
+    only that occurrence. Meal events are treated like any other event.
+  - The buffer applies between template blocks and existing events, never
+    between two template blocks — back-to-back blocks are the user's intent.
+  - The search window is the whole day, not work hours (templates hold evening
+    gym and morning routines), never before *now*; avoid-blocks are ignored
+    because the template is an explicit layout. Missed/displaced events don't
+    block. A block with no room is shown as skipped — never dropped silently.
+- **Writes** go through `EventApplyService` (insert / move / notifications /
+  save + `WidgetSync.refresh()`), the same helper the Ask AI confirm cards use.
+
+AI template generation ("describe a day → blocks") is deliberately not built
+yet.
+
 ### 3. Categories
 - User-defined categories applied to all events
 - Used for performance tracking and filtering
@@ -846,6 +889,8 @@ chips (Today / This week / Next 7 days / Next week), start/end date pickers,
 and a goals field. It calls `AIService.generate(periodStart:periodEnd:goals:…)`
 → `POST /v1/schedule/generate`, and hands the returned drafts to the same
 generate confirm card — nothing is inserted without the user's confirm.
+The same sheet has a **Goals (AI) | Templates** switch; Templates mode is the
+local, zero-AI way to fill a period from day templates (§2b).
 
 Config layering (ai-planner.md §7): standing truths (work hours, buffers,
 avoid-blocks, priority categories, AI level) ride along automatically in
@@ -1159,7 +1204,7 @@ Event
 - category: Category
 - recurrenceRule: RecurrenceRule?
 - status: EventStatus // .pending, .completed, .missed
-- source: EventSource // .manual, .ai, .imported
+- source: EventSource // .manual, .ai, .imported, .template
 - notificationIdentifier: String? // UUID string used to cancel/reschedule UNNotificationRequest
 
 Category
