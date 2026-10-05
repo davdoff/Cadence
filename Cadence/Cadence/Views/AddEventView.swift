@@ -24,6 +24,7 @@ struct AddEventView: View {
     @State private var startTime: Date = Calendar.current.date(bySettingHour: 9, minute: 0, second: 0, of: .now) ?? .now
     @State private var endTime: Date   = Calendar.current.date(bySettingHour: 10, minute: 0, second: 0, of: .now) ?? .now
     @State private var selectedCategory: Category?
+    @State private var notes = ""
     @State private var showConflictAlert = false
     @State private var conflictNames = ""
     @State private var repeatChoice: RepeatChoice = .never
@@ -157,6 +158,16 @@ struct AddEventView: View {
                         }
                     }
 
+                    // Imported events' notes belong to the source calendar —
+                    // every re-sync overwrites them — so they're shown read-only
+                    // in EventDetailView and not offered here (README §1.1b).
+                    if editingEvent?.source != .imported {
+                        Section("Notes") {
+                            TextField("Add notes", text: $notes, axis: .vertical)
+                                .lineLimit(3...10)
+                        }
+                    }
+
                     if editingEvent != nil {
                         applyScopeSection
                     }
@@ -190,6 +201,7 @@ struct AddEventView: View {
                     startTime = ev.startTime
                     endTime = ev.endTime
                     selectedCategory = ev.category
+                    notes = ev.notes ?? ""
                     if let series = RecurrenceService.shared.series(for: ev, context: context) {
                         isNativeSeries = true
                         repeatChoice = RepeatChoice(frequency: series.frequency)
@@ -207,6 +219,9 @@ struct AddEventView: View {
                 } else if let src = reschedulingSource {
                     title = src.title
                     selectedCategory = src.category
+                    // The replacement is a manual event, so an imported
+                    // original's notes become the user's own from here.
+                    notes = src.notes ?? ""
                     startTime = src.startTime
                     endTime = src.endTime
                 } else {
@@ -255,6 +270,12 @@ struct AddEventView: View {
     /// DateInterval traps on a negative duration — never build one from an
     /// inverted range (UI_REVIEW §1.1).
     private var isTimeRangeValid: Bool { combinedEnd > combinedStart }
+
+    /// Trimmed; nil when blank, so "no notes" is always nil (never "").
+    private var normalizedNotes: String? {
+        let trimmed = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
 
     private var canSave: Bool {
         !title.trimmingCharacters(in: .whitespaces).isEmpty && isTimeRangeValid
@@ -325,6 +346,7 @@ struct AddEventView: View {
             endTime: combinedEnd,
             category: selectedCategory
         )
+        event.notes = normalizedNotes
         context.insert(event)
         let prefs = prefsResults.first ?? UserPreferences()
         let svc = NotificationService()
@@ -359,6 +381,7 @@ struct AddEventView: View {
 
         event.title = title.trimmingCharacters(in: .whitespaces)
         event.category = selectedCategory
+        if event.source != .imported { event.notes = normalizedNotes }
 
         if timeChanged {
             svc.cancelEventNotifications(for: event)
@@ -388,6 +411,7 @@ struct AddEventView: View {
                 scope: seriesEditScope,
                 title: event.title,
                 category: event.category,
+                notes: event.notes,
                 startTimeOfDay: Calendar.current.dateComponents([.hour, .minute], from: startTime),
                 duration: combinedEnd.timeIntervalSince(combinedStart),
                 context: context

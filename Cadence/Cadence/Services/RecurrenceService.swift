@@ -85,6 +85,7 @@ final class RecurrenceService {
             duration: event.duration,
             category: event.category
         )
+        series.notes = event.notes
         context.insert(series)
         event.seriesID = series.id.uuidString
         materialize(series, context: context)
@@ -114,6 +115,7 @@ final class RecurrenceService {
         series.rule = rule
         series.title = occurrence.title
         series.category = occurrence.category
+        series.notes = occurrence.notes
         series.anchorStart = occurrence.startTime
         series.duration = occurrence.duration
         series.materializedUntil = occurrence.startTime
@@ -121,10 +123,10 @@ final class RecurrenceService {
         scheduleNearNotifications(context: context)
     }
 
-    /// Propagates an occurrence-level edit (title, category, time-of-day,
-    /// duration) from `occurrence` across its native series. Each affected
-    /// occurrence keeps its own calendar day but adopts the edited time-of-day
-    /// and duration; title and category are copied as-is. The series template
+    /// Propagates an occurrence-level edit (title, category, notes,
+    /// time-of-day, duration) from `occurrence` across its native series. Each
+    /// affected occurrence keeps its own calendar day but adopts the edited
+    /// time-of-day and duration; title, category and notes are copied as-is. The series template
     /// is updated so future materialization matches. Notifications for affected
     /// occurrences are rebuilt via the near-window scheduler. Occurrence
     /// statuses are left untouched, so `.all` never rewrites completed history
@@ -135,6 +137,7 @@ final class RecurrenceService {
         scope: SeriesEditScope,
         title: String,
         category: Category?,
+        notes: String?,
         startTimeOfDay: DateComponents,
         duration: TimeInterval,
         context: ModelContext
@@ -155,6 +158,7 @@ final class RecurrenceService {
         for event in affected {
             event.title = title
             event.category = category
+            event.notes = notes
             guard let newStart = calendar.date(bySettingHour: hour, minute: minute, second: 0, of: event.startTime)
             else { continue }
             if event.startTime != newStart || event.duration != duration {
@@ -172,6 +176,7 @@ final class RecurrenceService {
         // Update the template so future materialization matches the edit.
         series.title = title
         series.category = category
+        series.notes = notes
         if let anchorStart = calendar.date(bySettingHour: hour, minute: minute, second: 0, of: series.anchorStart) {
             series.anchorStart = anchorStart
         }
@@ -247,6 +252,7 @@ final class RecurrenceService {
                 category: series.category
             )
             event.seriesID = series.id.uuidString
+            event.notes = series.notes
             context.insert(event)
         }
         series.materializedUntil = horizon

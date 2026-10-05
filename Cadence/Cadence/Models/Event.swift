@@ -31,6 +31,15 @@ final class Event {
     // it to the source's (title/series updates still apply). Defaulted inline
     // for lightweight migration.
     var locallyEditedTime: Bool = false
+    // Location: imported events only — the source calendar's room / building
+    // / address, shown as-is. Notes: free text. On imported events both are
+    // source-owned (every re-sync refreshes them), so read-only in the app;
+    // on every other event notes are the user's, edited in AddEventView
+    // (CADENCE_README §1.1b, §2). Local-only: never sent in any AI payload
+    // (notes can hold lecturer names and private links). Defaulted inline
+    // for lightweight migration.
+    var location: String? = nil
+    var notes: String? = nil
 
     // Deep planner links (deep-planner-plan.md §5). Set on sessions the weekly
     // planner places: planId → the owning ProjectPlan.id; workUnitId → the

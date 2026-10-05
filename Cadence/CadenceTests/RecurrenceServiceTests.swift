@@ -130,6 +130,25 @@ final class RecurrenceServiceTests: XCTestCase {
         return all.filter { $0.seriesID == seriesID }.sorted { $0.startTime < $1.startTime }
     }
 
+    func testOccurrencesCarryTheAnchorsNotes() {
+        let anchor = Event(title: "Stretch",
+                           startTime: Date.now.addingTimeInterval(3600),
+                           endTime: Date.now.addingTimeInterval(3600 + 1800))
+        anchor.notes = "Hamstrings, then hips"
+        context.insert(anchor)
+        RecurrenceService.shared.createSeries(
+            from: anchor,
+            rule: RecurrenceRule(frequency: .daily, interval: 1, endDate: nil),
+            context: context
+        )
+
+        let events = seriesEvents(anchor.seriesID)
+        XCTAssertGreaterThan(events.count, 1)
+        XCTAssertTrue(events.allSatisfy { $0.notes == "Hamstrings, then hips" })
+        XCTAssertEqual(RecurrenceService.shared.series(for: anchor, context: context)?.notes,
+                       "Hamstrings, then hips", "the template carries it to future top-ups")
+    }
+
     func testCreateSeriesMaterializesTheHorizon() {
         let anchor = makeDailySeries()
         XCTAssertNotNil(anchor.seriesID)
@@ -228,7 +247,7 @@ final class RecurrenceServiceTests: XCTestCase {
 
         RecurrenceService.shared.applyOccurrenceEdit(
             from: anchor, scope: .all,
-            title: "Workout", category: fitness,
+            title: "Workout", category: fitness, notes: "Warm up first",
             startTimeOfDay: timeOfDay(6, 30), duration: 900, context: context
         )
 
@@ -236,6 +255,7 @@ final class RecurrenceServiceTests: XCTestCase {
         XCTAssertFalse(events.isEmpty)
         for e in events {
             XCTAssertEqual(e.title, "Workout")
+            XCTAssertEqual(e.notes, "Warm up first")
             XCTAssertEqual(e.category?.id, fitness.id)
             XCTAssertEqual(e.duration, 900)
             XCTAssertEqual(hm(e.startTime).0, 6)
@@ -253,7 +273,7 @@ final class RecurrenceServiceTests: XCTestCase {
 
         RecurrenceService.shared.applyOccurrenceEdit(
             from: pivot, scope: .thisAndFuture,
-            title: "Workout", category: fitness,
+            title: "Workout", category: fitness, notes: nil,
             startTimeOfDay: timeOfDay(6, 30), duration: 900, context: context
         )
 
@@ -276,7 +296,7 @@ final class RecurrenceServiceTests: XCTestCase {
 
         RecurrenceService.shared.applyOccurrenceEdit(
             from: anchor, scope: .all,
-            title: "Workout", category: fitness,
+            title: "Workout", category: fitness, notes: nil,
             startTimeOfDay: timeOfDay(6, 30), duration: 900, context: context
         )
 

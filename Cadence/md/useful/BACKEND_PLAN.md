@@ -210,11 +210,13 @@ POST /v1/plan/tweak          { now, timezone,
   deterministic/manual. Only changed fields appear per edit; ref + summary always do.
 
 POST /v1/calendar/ics        { url, now, timezone, windowStart, windowEnd }
-  → { "events": [{ "title", "start", "end", "allDay", "externalIdentifier" }],
+  → { "events": [{ "title", "location", "notes", "start", "end", "allDay",
+                   "externalIdentifier", "seriesIdentifier" }],
       "feedName": "string" | null }
   Deterministic ICS feed fetch + RFC 5545 parse + RRULE expansion — NO Claude
   call. Stateless (feed URL re-sent on every sync, never stored, never logged —
-  secret URLs carry auth). Full spec: `calendar-import.md` §4. Device-calendar
+  secret URLs carry auth). location/notes = unescaped LOCATION/DESCRIPTION,
+  null when absent. Full spec: CADENCE_README §1.1a–b. Device-calendar
   import (EventKit / CalendarContract) stays client-side per platform.
 
 GET  /v1/health              → { "status": "ok", "version": "1" }

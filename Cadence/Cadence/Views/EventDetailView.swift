@@ -5,9 +5,12 @@ struct EventDetailView: View {
     let event: Event
     @Environment(\.modelContext) private var context
     @Environment(\.theme) private var theme
+    @Environment(\.openURL) private var openURL
     @Query private var habits: [Habit]
 
     @State private var showingEdit = false
+    @State private var notesExpanded = false
+    @State private var notesTruncated = false
 
     private var dateString: String {
         let f = DateFormatter()
@@ -24,79 +27,88 @@ struct EventDetailView: View {
     var body: some View {
         ZStack {
             theme.backgroundGradient.ignoresSafeArea()
-            VStack(alignment: .leading, spacing: 12) {
-                // Title card
-                HStack(spacing: 14) {
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(categoryColor)
-                        .frame(width: 5)
-                        .padding(.vertical, 4)
+            // Scrolls because imported notes can run long once expanded.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    // Title card
+                    HStack(spacing: 14) {
+                        RoundedRectangle(cornerRadius: 3)
+                            .fill(categoryColor)
+                            .frame(width: 5)
+                            .padding(.vertical, 4)
 
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(event.title)
-                            .font(.title2.weight(.bold))
-                        Text(dateString)
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                        Text(timeRange)
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(event.title)
+                                .font(.title2.weight(.bold))
+                            Text(dateString)
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                            Text(timeRange)
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                        }
+
+                        Spacer()
+                    }
+                    .padding(16)
+                    .cardStyle()
+
+                    if let location = event.location {
+                        locationRow(location)
                     }
 
-                    Spacer()
-                }
-                .padding(16)
-                .cardStyle()
-
-                // Status card
-                HStack {
-                    Text("Status")
-                        .foregroundColor(.secondary)
-                    Spacer()
-                    statusBadge
-                }
-                .font(.subheadline)
-                .padding(16)
-                .cardStyle()
-
-                if let cat = event.category {
+                    // Status card
                     HStack {
-                        Text("Category")
+                        Text("Status")
                             .foregroundColor(.secondary)
                         Spacer()
-                        HStack(spacing: 6) {
-                            Circle()
-                                .fill(Color(hex: cat.colorHex))
-                                .frame(width: 8, height: 8)
-                            Text(cat.name)
+                        statusBadge
+                    }
+                    .font(.subheadline)
+                    .padding(16)
+                    .cardStyle()
+
+                    if let cat = event.category {
+                        HStack {
+                            Text("Category")
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            HStack(spacing: 6) {
+                                Circle()
+                                    .fill(Color(hex: cat.colorHex))
+                                    .frame(width: 8, height: 8)
+                                Text(cat.name)
+                                    .fontWeight(.medium)
+                            }
+                        }
+                        .font(.subheadline)
+                        .padding(16)
+                        .cardStyle()
+                    }
+
+                    if let repeats = recurrenceDescription {
+                        HStack {
+                            Text("Repeats")
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Label(repeats, systemImage: "repeat")
                                 .fontWeight(.medium)
                         }
+                        .font(.subheadline)
+                        .padding(16)
+                        .cardStyle()
                     }
-                    .font(.subheadline)
-                    .padding(16)
-                    .cardStyle()
-                }
 
-                if let repeats = recurrenceDescription {
-                    HStack {
-                        Text("Repeats")
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Label(repeats, systemImage: "repeat")
-                            .fontWeight(.medium)
+                    if let notes = event.notes {
+                        notesSection(notes)
                     }
-                    .font(.subheadline)
-                    .padding(16)
-                    .cardStyle()
-                }
 
-                if event.status == .pending {
-                    markActions
+                    if event.status == .pending {
+                        markActions
+                    }
                 }
-
-                Spacer()
+                .padding(16)
             }
-            .padding(16)
         }
         .navigationTitle(event.title)
         .navigationBarTitleDisplayMode(.inline)
@@ -112,6 +124,80 @@ struct EventDetailView: View {
         }
         .sheet(isPresented: $showingEdit) {
             AddEventView(editingEvent: event)
+        }
+    }
+
+    // MARK: - Location & notes (CADENCE_README §1.1b)
+    //
+    // Display-only here. Imported events' location/notes come from the source
+    // calendar and are refreshed on every re-sync, so they have no edit
+    // affordance anywhere; other events' notes are edited via the pencil
+    // (AddEventView).
+
+    /// Room / building / address as the source wrote it. Tap opens Apple Maps;
+    /// long-press selects the text (e.g. to copy a room number).
+    private func locationRow(_ location: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Image(systemName: "mappin.and.ellipse")
+                .foregroundColor(theme.accent)
+            Text(location)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Image(systemName: "arrow.up.right")
+                .font(.caption.weight(.semibold))
+                .foregroundColor(.secondary)
+        }
+        .font(.subheadline)
+        .padding(16)
+        .cardStyle()
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if let url = Self.mapsURL(for: location) { openURL(url) }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Location: \(location)")
+        .accessibilityHint("Opens in Maps")
+        .accessibilityAddTraits(.isButton)
+    }
+
+    /// The event's notes: 6 lines, then "Show more". URLs (Canvas, Zoom, …)
+    /// are tappable.
+    private func notesSection(_ notes: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Notes")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+            Text(Self.linkified(notes))
+                .font(.subheadline)
+                .lineLimit(notesExpanded ? nil : 6)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(truncationProbe(notes))
+            if notesTruncated {
+                Button(notesExpanded ? "Show less" : "Show more") {
+                    withAnimation(.easeInOut(duration: 0.2)) { notesExpanded.toggle() }
+                }
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(theme.accent)
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(16)
+        .cardStyle()
+    }
+
+    /// Sits behind the 6-line text at its clamped size: when the full text
+    /// doesn't fit that height, ViewThatFits falls through to the second
+    /// branch, which flags the notes as truncated (so "Show more" appears
+    /// only when there is more to show).
+    private func truncationProbe(_ notes: String) -> some View {
+        ViewThatFits(in: .vertical) {
+            Text(notes)
+                .font(.subheadline)
+                .fixedSize(horizontal: false, vertical: true)
+                .hidden()
+            Color.clear
+                .onAppear { notesTruncated = true }
         }
     }
 
@@ -174,6 +260,32 @@ struct EventDetailView: View {
             return series.rule.displayText
         }
         return "From imported calendar"
+    }
+
+    /// Apple Maps search for the location text, as-is (no geocoding). Every
+    /// character outside RFC 3986's unreserved set is percent-encoded, so
+    /// "&", "+", "#" or "," in an address can't break the query.
+    static func mapsURL(for location: String) -> URL? {
+        let unreserved = CharacterSet(charactersIn:
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+        guard let query = location.addingPercentEncoding(withAllowedCharacters: unreserved) else { return nil }
+        return URL(string: "https://maps.apple.com/?q=\(query)")
+    }
+
+    /// Notes text with detected URLs turned into tappable links.
+    static func linkified(_ text: String) -> AttributedString {
+        var attributed = AttributedString(text)
+        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+        else { return attributed }
+        let fullRange = NSRange(text.startIndex..., in: text)
+        for match in detector.matches(in: text, range: fullRange) {
+            guard let url = match.url,
+                  let stringRange = Range(match.range, in: text),
+                  let range = Range(stringRange, in: attributed)
+            else { continue }
+            attributed[range].link = url
+        }
+        return attributed
     }
 
     private var categoryColor: Color {

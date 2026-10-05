@@ -47,8 +47,10 @@ struct NextEventsWidgetView: View {
                 allDone
                 Spacer()
             } else {
-                ForEach(entry.pending.prefix(2)) { event in
-                    eventRow(event)
+                // Locations only when both rows still fit with them.
+                ViewThatFits(in: .vertical) {
+                    eventRows(showLocation: true)
+                    eventRows(showLocation: false)
                 }
                 Spacer(minLength: 0)
             }
@@ -56,7 +58,15 @@ struct NextEventsWidgetView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func eventRow(_ event: EventSnapshot) -> some View {
+    private func eventRows(showLocation: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(entry.pending.prefix(2)) { event in
+                eventRow(event, showLocation: showLocation)
+            }
+        }
+    }
+
+    private func eventRow(_ event: EventSnapshot, showLocation: Bool) -> some View {
         HStack(spacing: 7) {
             Circle()
                 .fill(Color(hex: event.colorHex))
@@ -68,6 +78,12 @@ struct NextEventsWidgetView: View {
                 Text(event.startTime, style: .time)
                     .font(.caption)
                     .foregroundColor(.secondary)
+                if showLocation, let location = event.location {
+                    Text(location)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
             }
         }
     }
@@ -96,9 +112,10 @@ struct NextEventsWidgetView: View {
                 Text(next.title)
                     .font(.headline)
                     .lineLimit(1)
-                Text(next.startTime, style: .time)
+                timeAndLocation(next)
                     .font(.caption)
                     .foregroundColor(.secondary)
+                    .lineLimit(1)
             } else {
                 Text("Cadence")
                     .font(.caption2)
@@ -110,5 +127,13 @@ struct NextEventsWidgetView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// "09:00 · Room 2A-04, Main Building" — one line; the location end
+    /// truncates first since the time comes first.
+    private func timeAndLocation(_ event: EventSnapshot) -> Text {
+        let time = Text(event.startTime, style: .time)
+        guard let location = event.location else { return time }
+        return Text("\(time) · \(location)")
     }
 }

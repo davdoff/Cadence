@@ -7,12 +7,15 @@
  * log a URL or embed one in an error message.
  *
  * Parsing is delegated to node-ical (container format, folding, VTIMEZONE)
- * and rrule (recurrence expansion). Two library quirks are compensated here:
+ * and rrule (recurrence expansion). Three library quirks are compensated here:
  *   - Zoned/UTC times come back as real instants (with a `.tz` tag), but
  *     floating and all-day (VALUE=DATE) times are materialized at the
  *     SERVER's wall clock — those are rebuilt as the same wall time in the
  *     device zone, so results are server-zone independent (BACKEND_PLAN.md §5).
  *   - RDATE is left as a raw value string, parsed minimally below.
+ *   - node-ical's TEXT unescape is a chain of replaceAll calls, which turns
+ *     an escaped backslash followed by "n" (`a\\nb`) into a newline. LOCATION
+ *     and DESCRIPTION are therefore kept raw and unescaped by `unescapeText`.
  */
 
 const ical = require("node-ical");
@@ -58,6 +61,61 @@ async function fetchFeed(rawUrl, fetchImpl = globalThis.fetch) {
   if (!/BEGIN:VCALENDAR/i.test(text)) throw badRequest("The URL did not return an iCalendar feed.");
   return text;
 }
+
+/**
+ * RFC 5545 §3.3.11 TEXT unescape in ONE left-to-right scan: `\n`/`\N` →
+ * newline, `\,` → `,`, `\;` → `;`, `\\` → `\`. Chained replaces break on
+ * `a\\nb`, which must come out as a literal backslash then "n". A lone or
+ * unknown escape keeps its backslash rather than silently dropping it.
+ */
+function unescapeText(raw) {
+  let out = "";
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw[i];
+    if (c !== "\\" || i === raw.length - 1) {
+      out += c;
+      continue;
+    }
+    const next = raw[i + 1];
+    if (next === "n" || next === "N") out += "\n";
+    else if (next === "," || next === ";" || next === "\\") out += next;
+    else {
+      out += c;
+      continue;
+    }
+    i++;
+  }
+  return out;
+}
+
+/** Unescaped + trimmed; null when nothing is left (blank fields carry no info). */
+function sourceText(raw) {
+  if (typeof raw !== "string") return null;
+  const s = unescapeText(raw).trim();
+  return s.length > 0 ? s : null;
+}
+
+/**
+ * node-ical with LOCATION/DESCRIPTION stored raw (still escaped) under their
+ * own keys, so `sourceText` does the unescape correctly. node-ical has
+ * already unfolded the line and split off the parameters by then (quoted
+ * params like ALTREP="cid:..." included), so `value` is just the text. First
+ * occurrence wins. X-ALT-DESC (the HTML description) is a different
+ * property and never lands here. The override is a private handler table
+ * on a parser object of our own — the library's shared table is untouched.
+ */
+const keepRaw = (key) => (value, _params, curr) => {
+  if (curr[key] === undefined) curr[key] = value;
+  return curr;
+};
+const icsParser = {
+  ...ical,
+  objectHandlers: {
+    ...ical.objectHandlers,
+    LOCATION: keepRaw("locationRaw"),
+    DESCRIPTION: keepRaw("descriptionRaw"),
+  },
+};
 
 /** node-ical text values are sometimes `{ params, val }` objects. */
 function textValue(v, fallback) {
@@ -115,6 +173,11 @@ function expandEvent(ev, { windowStart, windowEnd, zone }) {
 
   const uid = textValue(ev.uid, null);
   const title = textValue(ev.summary, "Untitled");
+  // Source-owned display details (CADENCE_README §1.1b), local-only on the
+  // device. An override without its own value falls back to the master's,
+  // the same way the title does.
+  const location = sourceText(ev.locationRaw);
+  const notes = sourceText(ev.descriptionRaw);
   const allDay = ev.datetype === "date";
   const start = toZoned(ev.start, zone);
   let end = ev.end instanceof Date ? toZoned(ev.end, zone) : start;
@@ -124,7 +187,7 @@ function expandEvent(ev, { windowStart, windowEnd, zone }) {
 
   if (!ev.rrule) {
     return overlaps(start, end)
-      ? [{ title, start, end, allDay, externalIdentifier: externalId, seriesIdentifier: null }]
+      ? [{ title, location, notes, start, end, allDay, externalIdentifier: externalId, seriesIdentifier: null }]
       : [];
   }
 
@@ -170,6 +233,8 @@ function expandEvent(ev, { windowStart, windowEnd, zone }) {
     if (!overlaps(s, e)) return;
     instances.push({
       title: textValue(ov.summary, title),
+      location: sourceText(ov.locationRaw) ?? location,
+      notes: sourceText(ov.descriptionRaw) ?? notes,
       start: s,
       end: e,
       allDay: ov.datetype === "date",
@@ -196,6 +261,8 @@ function expandEvent(ev, { windowStart, windowEnd, zone }) {
     if (overlaps(occStart, occEnd)) {
       instances.push({
         title,
+        location,
+        notes,
         start: occStart,
         end: occEnd,
         allDay,
@@ -221,6 +288,8 @@ function expandEvent(ev, { windowStart, windowEnd, zone }) {
     if (overlaps(dt, e)) {
       instances.push({
         title,
+        location,
+        notes,
         start: dt,
         end: e,
         allDay,
@@ -237,7 +306,7 @@ function expandEvent(ev, { windowStart, windowEnd, zone }) {
 function expandFeed(icsText, { windowStart, windowEnd, zone }) {
   let data;
   try {
-    data = ical.sync.parseICS(icsText);
+    data = icsParser.parseLines(icsText.split(/\r?\n/));
   } catch {
     throw badRequest("The feed could not be parsed as iCalendar.");
   }
@@ -259,6 +328,8 @@ function expandFeed(icsText, { windowStart, windowEnd, zone }) {
   return {
     events: instances.map((e) => ({
       title: e.title,
+      location: e.location,
+      notes: e.notes,
       start: toISO(e.start),
       end: toISO(e.end),
       allDay: e.allDay,
@@ -269,4 +340,4 @@ function expandFeed(icsText, { windowStart, windowEnd, zone }) {
   };
 }
 
-module.exports = { fetchFeed, expandFeed, normalizeFeedURL };
+module.exports = { fetchFeed, expandFeed, normalizeFeedURL, unescapeText };

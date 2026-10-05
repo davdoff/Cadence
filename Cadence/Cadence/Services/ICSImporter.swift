@@ -33,6 +33,10 @@ struct ICSImporter {
                 let allDay: Bool
                 let externalIdentifier: String
                 let seriesIdentifier: String?
+                // Server-unescaped LOCATION / DESCRIPTION; nil (or absent,
+                // from an older server) when the feed has none.
+                let location: String?
+                let notes: String?
             }
             let events: [Item]
             let feedName: String?
@@ -66,7 +70,9 @@ struct ICSImporter {
                 isAllDay: item.allDay,
                 externalIdentifier: item.externalIdentifier,
                 categoryHint: response.feedName ?? "Imported",
-                seriesIdentifier: item.seriesIdentifier
+                seriesIdentifier: item.seriesIdentifier,
+                location: ImportedEventInstance.sourceText(item.location),
+                notes: ImportedEventInstance.sourceText(item.notes)
             )
         }
         return FeedResult(feedName: response.feedName, instances: instances)

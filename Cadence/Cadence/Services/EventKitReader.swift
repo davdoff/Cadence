@@ -67,7 +67,12 @@ final class EventKitReader {
                 isAllDay: ek.isAllDay,
                 externalIdentifier: ids.external,
                 categoryHint: calendar.title,
-                seriesIdentifier: ids.series
+                seriesIdentifier: ids.series,
+                // The plain `location` string, not structuredLocation?.title:
+                // it's the full text Apple Calendar displays, while the
+                // structured title can be shorter or drop the room.
+                location: ImportedEventInstance.sourceText(ek.location),
+                notes: ImportedEventInstance.sourceText(ek.notes)
             )
         }
     }

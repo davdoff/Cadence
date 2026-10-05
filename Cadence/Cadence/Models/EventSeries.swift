@@ -22,6 +22,9 @@ final class EventSeries {
     var title: String
     var anchorStart: Date
     var duration: TimeInterval
+    // Copied onto every generated occurrence, like title. Defaulted inline
+    // for lightweight migration.
+    var notes: String? = nil
 
     // High-water mark: top-up only generates occurrences strictly after this,
     // so locally deleted occurrences are never resurrected on the next pass.

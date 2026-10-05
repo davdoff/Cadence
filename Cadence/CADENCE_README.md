@@ -35,7 +35,7 @@ event. No AI involved anywhere in the import.
   `NSCalendarsFullAccessUsageDescription` is in `Cadence/Info.plist`. The OS
   grant is all-or-nothing, so the screen has its own per-calendar picker;
   denied/write-only states deep-link to Settings.
-- **Pieces**: `EventKitReader` (pure EventKit → `DeviceEventInstance` value
+- **Pieces**: `EventKitReader` (pure EventKit → `ImportedEventInstance` value
   structs, one shared `EKEventStore`) → `CalendarImportService` (@MainActor
   sync orchestration, SwiftData writes) → `CalendarImportView` (picker +
   source management UI). New model `CalendarImportSource` (member of the
@@ -44,7 +44,8 @@ event. No AI involved anywhere in the import.
 - **Event model additions**: `externalIdentifier` (stable per occurrence —
   EventKit's `calendarItemExternalIdentifier`, suffixed with the occurrence
   date for recurring events) and `importSourceID` (which calendar/feed);
-  both nil for manual/AI events. `source = .imported`.
+  both nil for manual/AI events. `source = .imported`. Plus the source's
+  `location` and `notes` — see §1.1b.
 - **Recurring imports**: occurrences of a recurring source event share a
   `seriesID` (the unsuffixed base identifier; the ICS DTOs carry it as
   `seriesIdentifier`, null for one-offs). That powers the repeat badge,
@@ -56,7 +57,7 @@ event. No AI involved anywhere in the import.
   get an `EventSeries` row — the source calendar owns the rule (§2.1).
 - **Sync lifecycle** (90-day window): on launch, on `.EKEventStoreChanged`
   (debounced), on manual "Sync now", and when connecting a calendar. Re-sync
-  updates title/times in place by `externalIdentifier`, preserves
+  updates title/times/location/notes in place by `externalIdentifier`, preserves
   `.completed`/`.missed` status, deletes local copies of events removed at
   the source (pending only), rebuilds notifications for changed events, and
   refreshes widgets once per pass. All-day events are skipped (they'd block
@@ -99,8 +100,9 @@ event. No AI involved anywhere in the import.
 The server half of feed import. Entirely deterministic — no Claude call, no
 state. The client re-sends `{ url, now, timezone, windowStart, windowEnd }` on
 every sync and gets back `{ events, feedName }` — plain DTOs
-(`title / start / end / allDay / externalIdentifier / seriesIdentifier`). The
-server stores nothing between calls.
+(`title / location / notes / start / end / allDay / externalIdentifier /
+seriesIdentifier`; `location`/`notes` are always present, null when the feed
+has none). The server stores nothing between calls.
 
 - **Window validation** (in the route, before any fetch): `windowEnd` must be
   after `windowStart`, a date-only `windowEnd` is treated as inclusive
@@ -121,8 +123,8 @@ server stores nothing between calls.
 - **Parsing** is delegated to `node-ical` (container format, line folding,
   VTIMEZONE) and `rrule` (recurrence expansion): RRULE, EXDATE, RDATE and
   RECURRENCE-ID overrides. `STATUS:CANCELLED` events are dropped.
-- **Two library quirks are compensated for here**, both serving the OS-blind
-  rule that the *device's* timezone decides everything:
+- **Three library quirks are compensated for here** — the first two serve the
+  OS-blind rule that the *device's* timezone decides everything:
   1. Zoned and UTC times arrive as real instants (tagged `.tz`) and are just
      converted to the device zone. **Floating and all-day (`VALUE=DATE`)
      times**, though, are materialized by node-ical at the *server's* wall
@@ -132,16 +134,69 @@ server stores nothing between calls.
      hand (Z-suffixed UTC, or wall time in the event's own zone, falling back
      to the device zone when floating). An unparseable token is skipped rather
      than failing the whole feed.
+  3. **TEXT unescaping.** node-ical unescapes with chained `replaceAll`s, which
+     turns an escaped backslash followed by `n` (`a\\nb`) into a newline. So
+     `LOCATION` and `DESCRIPTION` are kept raw through a private handler table
+     (node-ical has already unfolded the line and stripped parameters such as
+     `LANGUAGE=` or a quoted `ALTREP="cid:…"`) and unescaped by `unescapeText`
+     in one left-to-right scan (`\n`/`\N`, `\,`, `\;`, `\\`). Then trimmed;
+     blank → null. `X-ALT-DESC` (HTML) and `VALARM` descriptions are ignored.
+     A `RECURRENCE-ID` override without its own value inherits the master's,
+     as the title does.
 - **Output** matches what EventKit import produces, so feeds and device
   calendars share one dedupe/tombstone pass on the client (§1.1): each instance
   carries a per-occurrence identifier plus a `seriesIdentifier` (null for
   one-offs). The client decodes them through the thin `ICSImporter`.
 
+#### 1.1b Location & notes on imported events
+
+Uni classes used to arrive without their room — the source data was there but
+`Event` had nowhere to put it. Now `Event.location` and `Event.notes`
+(optional, defaulted inline → lightweight migration) carry it. Plan and
+reasoning: `calendar-import-location-notes.md`.
+
+- **Mapping.** EventKit: `EKEvent.location` (the plain string — the full text
+  Apple Calendar shows; `structuredLocation?.title` can drop the room) and
+  `EKEvent.notes`. ICS: `LOCATION` / `DESCRIPTION`, unescaped server-side
+  (§1.1a quirk 3). Both paths go through
+  `ImportedEventInstance.sourceText`: trim whitespace/newlines, blank → nil.
+  No length cap in storage.
+- **Source-owned.** Every re-sync sets both to the source's current value
+  (including clearing them), which is also how events imported before this
+  existed get backfilled — no migration step. The dedupe pass only writes an
+  event when something differs, so an unchanged sync dirties nothing and
+  reloads no widget. Other re-sync rules (title, times, status, category) are
+  unchanged.
+- **Read-only on imported events.** `EventDetailView` shows a location card
+  (`mappin.and.ellipse`, selectable text, tap → `maps.apple.com/?q=…` search)
+  and a Notes card (6 lines + "Show more" when truncated, selectable, URLs
+  tappable via `NSDataDetector`). For imported events neither is editable —
+  AddEventView hides its Notes section for them — because the next re-sync
+  would overwrite the edit. Every other event's notes are the user's own and
+  editable there (§2); `location` stays import-only.
+- **Widget.** `EventSnapshot.location` feeds Next Events: the lock-screen
+  rectangular shows `time · location` on one line; the small widget adds the
+  location under each time only when both rows still fit (`ViewThatFits`).
+  **Notes never go into a widget snapshot** — widgets render on the lock
+  screen.
+- **Never in AI payloads.** Neither field is part of any `/v1` request DTO;
+  notes hold lecturer names, private meeting links, or whatever the user
+  types. (The ICS *response*
+  carries them back to the device — the server stores and logs nothing.)
+
 ### 2. Event Management
 Each event supports:
 - Delete single occurrence
 - Delete this-and-future occurrences (recurring events — §2.1)
-- Edit title, date, time, duration, and category from the event detail view (implemented — reuses the Add Event form in edit mode; `id`/`source`/`status` are never changed, and time changes cancel and reschedule the notification)
+- Edit title, date, time, duration, category, and notes from the event detail view (implemented — reuses the Add Event form in edit mode; `id`/`source`/`status` are never changed, and time changes cancel and reschedule the notification)
+- **Notes**: a free-text Notes section in the Add/Edit form (trimmed, blank →
+  nil), shown on the detail view's Notes card (§1.1b). Hidden in the form for
+  imported events, whose notes belong to the source calendar. A native
+  series copies notes like the title: the `EventSeries` template carries them
+  onto every generated occurrence, and "Change all occurrences" propagates an
+  edit. The missed-tray reschedule carries the original's notes over. Distinct
+  from a deep-planner session's `objective` (the plan's goal for the session),
+  which stays plan-owned.
 - Mark as **Completed** or **Missed**
 - Assign to a **Category**
 - **Tap-through**: event rows on Today and Schedule open `EventDetailView`
@@ -215,7 +270,7 @@ every-X cadences), and an optional end date.
   offers a "Change all occurrences" toggle for a native series; ticking it
   reveals a scope picker — *This & future* (mirrors rule-change semantics,
   history untouched) or *All (incl. past)*. `RecurrenceService.applyOccurrenceEdit`
-  copies the edited title/category onto the chosen occurrences and stamps the
+  copies the edited title/category/notes onto the chosen occurrences and stamps the
   edited time-of-day + duration onto each (every occurrence keeps its own day),
   updates the `EventSeries` template, and rebuilds near-window notifications.
   Occurrence statuses are never changed, so `All` never rewrites completed
@@ -1206,6 +1261,8 @@ Event
 - status: EventStatus // .pending, .completed, .missed
 - source: EventSource // .manual, .ai, .imported, .template
 - notificationIdentifier: String? // UUID string used to cancel/reschedule UNNotificationRequest
+- location: String? // imported events only, source-owned (§1.1b)
+- notes: String? // source-owned on imports, user-editable otherwise; never sent to AI (§1.1b, §2)
 
 Category
 - id: UUID

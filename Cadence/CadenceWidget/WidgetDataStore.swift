@@ -9,6 +9,9 @@ struct EventSnapshot: Identifiable {
     let startTime: Date
     let endTime: Date
     let colorHex: String
+    /// Imported events' location (CADENCE_README §1.1b); nil otherwise.
+    /// Notes never go into a snapshot — widgets show on the lock screen.
+    var location: String? = nil
 }
 
 struct HabitSnapshot: Identifiable {
@@ -99,7 +102,8 @@ enum WidgetDataStore {
             title: event.title,
             startTime: event.startTime,
             endTime: event.endTime,
-            colorHex: event.category?.colorHex ?? WidgetTheme.accentHex
+            colorHex: event.category?.colorHex ?? WidgetTheme.accentHex,
+            location: event.location
         )
     }
 

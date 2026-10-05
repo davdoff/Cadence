@@ -2,7 +2,8 @@
  * POST /v1/calendar/ics — fixture ICS strings, injected fake fetch, zero
  * network, deterministic window/zone (CADENCE_README §1.1a). Covers: a UTC
  * event, a TZID event, an all-day event, a weekly RRULE with an EXDATE and a
- * RECURRENCE-ID override, a floating event, and a folded long SUMMARY line.
+ * RECURRENCE-ID override, a floating event, and a folded long SUMMARY line;
+ * plus LOCATION/DESCRIPTION extraction (parameters, folding, TEXT unescape).
  *
  * The service must be server-zone independent — run the suite under a few
  * different TZ values to check (e.g. TZ=UTC npm test).
@@ -101,9 +102,16 @@ test("expands a mixed feed: UTC, TZID RRULE+EXDATE+override, all-day, floating, 
     assert.equal(fetchedUrl, BASE_REQ.url);
     assert.equal(claudeCalls(), 0); // deterministic endpoint — no AI call
 
+    // No LOCATION/DESCRIPTION in this fixture: both keys are present and
+    // null (never omitted), so the client can decode them unconditionally.
+    for (const e of body.events) {
+      assert.equal(e.location, null);
+      assert.equal(e.notes, null);
+    }
+
     // seriesIdentifier: the unsuffixed UID shared by every occurrence of a
     // recurring event (including overrides), null for one-off events.
-    assert.deepEqual(body.events, [
+    assert.deepEqual(body.events.map(({ location, notes, ...rest }) => rest), [
       { title: "Algorithms lecture",
         start: "2026-07-08T10:00:00+03:00", end: "2026-07-08T12:00:00+03:00",
         allDay: false, externalIdentifier: "lecture@uni.edu#2026-07-08T10:00:00+03:00",
@@ -298,5 +306,101 @@ test("pathologically dense RRULE (FREQ=MINUTELY, unbounded) → 400, not a memor
     const { status, body } = await post(BASE_REQ);
     assert.equal(status, 400);
     assert.equal(body.error.code, "BAD_REQUEST");
+  } finally { close(); }
+});
+
+// ── LOCATION / DESCRIPTION (calendar-import-location-notes.md §2) ─────────
+
+test("unescapeText: one left-to-right scan, so an escaped backslash before n stays literal", () => {
+  const { unescapeText } = require("../services/ics");
+  assert.equal(unescapeText(String.raw`Room 2A-04\, Main Building`), "Room 2A-04, Main Building");
+  assert.equal(unescapeText(String.raw`Line1\nLine2`), "Line1\nLine2");
+  assert.equal(unescapeText(String.raw`Line1\NLine2`), "Line1\nLine2");
+  assert.equal(unescapeText(String.raw`a\;b`), "a;b");
+  // `a\\nb` on the wire = a, escaped backslash, then a plain "n".
+  assert.equal(unescapeText(String.raw`a\\nb`), String.raw`a\nb`);
+  assert.ok(!unescapeText(String.raw`a\\nb`).includes("\n"));
+  // Unknown escapes and a trailing lone backslash keep the backslash.
+  assert.equal(unescapeText("C:\\temp\\"), "C:\\temp\\");
+});
+
+test("LOCATION and DESCRIPTION: parameters ignored, folding undone, TEXT unescaped, blanks → null", async () => {
+  const feed = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "BEGIN:VEVENT",
+    "UID:loc-1@test",
+    "SUMMARY:Databases lab",
+    "DTSTART:20260710T070000Z",
+    "DTEND:20260710T090000Z",
+    "LOCATION;LANGUAGE=en:Room 2A-04\\, Main Building",
+    // A DESCRIPTION folded across 3 physical lines, with a quoted parameter
+    // containing a colon, escaped newlines and an escaped backslash + n.
+    'DESCRIPTION;ALTREP="cid:part1.0001@example.org":Lecturer: Dr. Popescu\\nBri',
+    " ng a laptop\\; slides on Can",
+    " vas\\nPath: C:\\\\new",
+    "X-ALT-DESC;FMTTYPE=text/html:<p>HTML version — must be ignored</p>",
+    "BEGIN:VALARM",
+    "ACTION:DISPLAY",
+    "DESCRIPTION:Reminder text — belongs to the alarm\\, not the event",
+    "TRIGGER:-PT15M",
+    "END:VALARM",
+    "END:VEVENT",
+    "BEGIN:VEVENT",
+    "UID:blank-1@test",
+    "SUMMARY:Blank details",
+    "DTSTART:20260711T070000Z",
+    "DTEND:20260711T080000Z",
+    "LOCATION:   ",
+    "DESCRIPTION:\\n\\n",
+    "END:VEVENT",
+    "END:VCALENDAR",
+    "",
+  ].join("\r\n");
+  const { post, close } = boot(async () => icsResponse(feed));
+  try {
+    const { status, body } = await post(BASE_REQ);
+    assert.equal(status, 200);
+    const [lab, blank] = body.events;
+    assert.equal(lab.location, "Room 2A-04, Main Building");
+    assert.equal(lab.notes, "Lecturer: Dr. Popescu\nBring a laptop; slides on Canvas\nPath: C:\\new");
+    // Whitespace-only (or escaped-newline-only) values carry nothing → null.
+    assert.equal(blank.location, null);
+    assert.equal(blank.notes, null);
+  } finally { close(); }
+});
+
+test("recurring LOCATION: every occurrence carries it; an override's own value wins, else the master's", async () => {
+  const feed = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "BEGIN:VEVENT",
+    "UID:seminar@uni.edu",
+    "SUMMARY:Seminar",
+    "LOCATION:Room 101",
+    "DESCRIPTION:Bring the reading",
+    "DTSTART;TZID=Europe/Bucharest:20260708T100000",
+    "DTEND;TZID=Europe/Bucharest:20260708T110000",
+    "RRULE:FREQ=WEEKLY;COUNT=3",
+    "END:VEVENT",
+    "BEGIN:VEVENT",
+    "UID:seminar@uni.edu",
+    "RECURRENCE-ID;TZID=Europe/Bucharest:20260715T100000",
+    "SUMMARY:Seminar",
+    "LOCATION:Room 202 (this week only)",
+    "DTSTART;TZID=Europe/Bucharest:20260715T100000",
+    "DTEND;TZID=Europe/Bucharest:20260715T110000",
+    "END:VEVENT",
+    "END:VCALENDAR",
+    "",
+  ].join("\r\n");
+  const { post, close } = boot(async () => icsResponse(feed));
+  try {
+    const { status, body } = await post(BASE_REQ);
+    assert.equal(status, 200);
+    assert.deepEqual(body.events.map((e) => e.location),
+      ["Room 101", "Room 202 (this week only)", "Room 101"]);
+    assert.deepEqual(body.events.map((e) => e.notes),
+      ["Bring the reading", "Bring the reading", "Bring the reading"]);
   } finally { close(); }
 });

@@ -15,6 +15,20 @@ struct ImportedEventInstance {
     // nil for one-off events. Becomes Event.seriesID so the app can group and
     // badge the occurrences — the source still owns the rule and expansion.
     let seriesIdentifier: String?
+    // Source-owned display details (§1.1b): already trimmed, nil when blank.
+    // Refreshed on every re-sync; never sent in any AI payload.
+    let location: String?
+    let notes: String?
+
+    /// The one normalisation rule for source text: trim whitespace and
+    /// newlines, nil when nothing is left. No length cap — long notes are
+    /// truncated only in the UI.
+    static func sourceText(_ raw: String?) -> String? {
+        guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty
+        else { return nil }
+        return trimmed
+    }
 }
 
 /// Calendar import orchestration (CADENCE_README §1.1): runs sync passes
@@ -108,8 +122,9 @@ final class CalendarImportService {
     // MARK: - The shared dedupe pass
 
     /// Applies one source's fetched instances to the local store. Returns
-    /// true when anything was inserted, updated, or deleted.
-    private func apply(
+    /// true when anything was inserted, updated, or deleted. Never saves —
+    /// the caller does. Internal (not private) for CalendarImportServiceTests.
+    func apply(
         _ instances: [ImportedEventInstance],
         to source: CalendarImportSource,
         window: DateInterval,
@@ -183,13 +198,17 @@ final class CalendarImportService {
         // rule. seriesID only groups them (badge, series-aware delete).
         event.recurrenceRule = nil
         event.seriesID = instance.seriesIdentifier
+        event.location = instance.location
+        event.notes = instance.notes
         context.insert(event)
         schedule(event, prefs: prefs, notifications: notifications)
     }
 
     /// Re-sync rule (§1): update title/times in place, preserve status —
-    /// never overwrite a .completed/.missed the user set. Returns true if
-    /// anything actually differed.
+    /// never overwrite a .completed/.missed the user set. Location and notes
+    /// are source-owned (§1.1b): always the source's current value. Returns
+    /// true if anything actually differed — an unchanged event isn't written,
+    /// so a no-op sync dirties nothing and reloads no widget.
     private func update(
         _ event: Event,
         from instance: ImportedEventInstance,
@@ -205,10 +224,15 @@ final class CalendarImportService {
         // Backfills the recurring tag onto events imported before seriesID
         // existed — one sync retro-marks them.
         let seriesChanged = event.seriesID != instance.seriesIdentifier
-        guard timeChanged || titleChanged || seriesChanged else { return false }
+        // Also backfills location/notes onto events imported before those
+        // fields existed — no separate migration step.
+        let detailsChanged = event.location != instance.location || event.notes != instance.notes
+        guard timeChanged || titleChanged || seriesChanged || detailsChanged else { return false }
 
         event.title = instance.title
         event.seriesID = instance.seriesIdentifier
+        event.location = instance.location
+        event.notes = instance.notes
         if timeChanged {
             event.startTime = instance.start
             event.endTime = instance.end

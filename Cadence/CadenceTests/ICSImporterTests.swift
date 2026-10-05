@@ -91,6 +91,39 @@ final class ICSImporterTests: XCTestCase {
         XCTAssertNil(result.instances[1].seriesIdentifier)
     }
 
+    func testDecodesLocationAndNotesAndToleratesTheirAbsence() async throws {
+        // Unescaping is the server's job (server/test/ics.test.js); the client
+        // only trims and maps blank → nil. The second item omits both keys,
+        // as an older server would.
+        let json = """
+        { "events": [
+            { "title": "Databases lab", "start": "2030-06-15T10:00:00+03:00",
+              "end": "2030-06-15T12:00:00+03:00", "allDay": false,
+              "externalIdentifier": "lab@test",
+              "location": "Room 2A-04, Main Building",
+              "notes": "Lecturer: Dr. Popescu\\nBring a laptop" },
+            { "title": "Old server", "start": "2030-06-16T10:00:00+03:00",
+              "end": "2030-06-16T11:00:00+03:00", "allDay": false,
+              "externalIdentifier": "old@test" },
+            { "title": "Blank", "start": "2030-06-17T10:00:00+03:00",
+              "end": "2030-06-17T11:00:00+03:00", "allDay": false,
+              "externalIdentifier": "blank@test",
+              "location": "   ", "notes": null }
+          ],
+          "feedName": null }
+        """
+        let importer = makeImporter(returning: json)
+
+        let result = try await importer.importFeed(urlString: "https://x/y.ics", window: window)
+
+        XCTAssertEqual(result.instances[0].location, "Room 2A-04, Main Building")
+        XCTAssertEqual(result.instances[0].notes, "Lecturer: Dr. Popescu\nBring a laptop")
+        XCTAssertNil(result.instances[1].location)
+        XCTAssertNil(result.instances[1].notes)
+        XCTAssertNil(result.instances[2].location, "whitespace-only → nil")
+        XCTAssertNil(result.instances[2].notes)
+    }
+
     func testMissingFeedNameFallsBackToImportedHint() async throws {
         let json = """
         { "events": [
